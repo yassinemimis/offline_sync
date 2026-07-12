@@ -1,0 +1,28 @@
+name: offline_sync_drift
+description: >
+  Drift (SQLite) storage adapter for offline_sync_core — implements the
+  local database, the Queue table, and metadata columns (isSynced, version,
+  deleted).
+version: 0.0.1
+homepage: https://github.com/<org>/offline_sync
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  offline_sync_core:
+    path: ../offline_sync_core
+  drift: ^2.20.0
+  sqlite3_flutter_libs: ^0.5.24
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  drift_dev: ^2.20.0
+  build_runner: ^2.4.11
+  lints: ^4.0.0

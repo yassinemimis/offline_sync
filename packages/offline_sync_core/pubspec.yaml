@@ -1,0 +1,24 @@
+name: offline_sync_core
+description: >
+  Storage-agnostic core contracts and engine for the Flutter Offline Sync Kit.
+  Defines the public API surface (register/save/sync), the Queue model,
+  and the SyncAdapter contract that database packages implement against.
+version: 0.0.1
+homepage: https://github.com/<org>/offline_sync
+repository: https://github.com/<org>/offline_sync
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  connectivity_plus: ^6.0.0
+  uuid: ^4.4.0
+  meta: ^1.15.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^4.0.0

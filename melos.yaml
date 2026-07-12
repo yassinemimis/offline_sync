@@ -1,0 +1,29 @@
+name: offline_sync
+
+packages:
+  - packages/**
+
+command:
+  bootstrap:
+    runPubGetInParallel: true
+  version:
+    message: "chore: version packages"
+
+scripts:
+  analyze:
+    run: melos exec -- flutter analyze
+    description: تشغيل الـ analyzer على كل الحزم
+
+  test:
+    run: melos exec -- flutter test
+    description: تشغيل الاختبارات على كل حزمة فيها مجلد test
+    packageFilters:
+      dirExists: test
+
+  format:
+    run: melos exec -- dart format . --set-exit-if-changed
+    description: فحص التنسيق على كل الحزم
+
+  format:fix:
+    run: melos exec -- dart format .
+    description: تصحيح التنسيق تلقائيًا
