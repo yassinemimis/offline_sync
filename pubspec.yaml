@@ -1,0 +1,34 @@
+name: offline_sync_workspace
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+# Melos 8+ relies on native Dart/Flutter pub workspaces — this list must
+# be explicit (globs aren't supported yet). Add each new package here as
+# it's created (e.g. offline_sync_example once it has a pubspec.yaml).
+workspace:
+  - packages/offline_sync_core
+  - packages/offline_sync_drift
+
+melos:
+  name: offline_sync
+
+  scripts:
+    analyze:
+      run: melos exec -- flutter analyze
+      description: Run the analyzer for all packages
+
+    test:
+      run: melos exec -- flutter test
+      description: Run tests for every package that contains a test directory
+      packageFilters:
+        dirExists: test
+
+    format:
+      run: melos exec -- dart format . --set-exit-if-changed
+      description: Check code formatting across all packages
+
+    format:fix:
+      run: melos exec -- dart format .
+      description: Automatically fix code formatting
