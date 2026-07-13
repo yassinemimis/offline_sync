@@ -47,14 +47,25 @@ abstract class LocalStorage {
 
   Future<void> enqueueOperation(SyncOperation operation);
 
-  /// Pending/failed operations, oldest first — the order they must be
-  /// replayed in.
-  Future<List<SyncOperation>> getPendingOperations();
+  /// Operations ready to be attempted right now, oldest first: every
+  /// [SyncOperationStatus.pending] row, plus [SyncOperationStatus.failed]
+  /// rows whose [SyncOperation.nextRetryAt] is `null` or has already
+  /// passed relative to [now]. [SyncOperationStatus.exhausted] rows are
+  /// never returned — they've used up their retry budget (see
+  /// [RetryPolicy]) and need manual intervention.
+  Future<List<SyncOperation>> getPendingOperations({DateTime? now});
 
+  /// Updates an operation after a send attempt.
+  ///
+  /// [nextRetryAt] is set alongside [SyncOperationStatus.failed] to
+  /// schedule the next attempt ([RetryPolicy.nextRetryAt]); leave it
+  /// `null` for [SyncOperationStatus.exhausted] (there is no next
+  /// attempt) or [SyncOperationStatus.synced].
   Future<void> updateOperationStatus(
     String operationId,
     SyncOperationStatus status, {
     int? retryCount,
+    DateTime? nextRetryAt,
   });
 
   /// Removes an operation once the server has acknowledged it.

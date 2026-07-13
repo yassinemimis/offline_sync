@@ -2,9 +2,10 @@ import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
+import 'package:offline_sync_core/offline_sync_core.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
-import 'package:offline_sync_core/offline_sync_core.dart'; 
+
 import '../tables/entities_table.dart';
 import '../tables/sync_operations_table.dart';
 
@@ -23,7 +24,19 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(QueryExecutor executor) : super(executor);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            // Phase 3: retry/backoff needs to know when an operation is
+            // next eligible to be retried.
+            await m.addColumn(syncOperationsTable, syncOperationsTable.nextRetryAt);
+          }
+        },
+      );
 }
 
 LazyDatabase _openConnection() {

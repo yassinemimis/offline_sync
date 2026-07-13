@@ -4,19 +4,21 @@ import '../contracts/local_storage.dart';
 import '../contracts/sync_adapter.dart';
 import '../contracts/sync_operation.dart';
 import '../contracts/sync_transport.dart';
+import '../retry/retry_policy.dart';
 
 /// Public entry point of the library.
 ///
-/// Phase 2 status: `register`, `save`, `delete`, `getAll` are fully
-/// implemented against [LocalStorage]. `sync()` now actually sends queued
-/// operations through a [SyncTransport] (e.g. `DioSyncTransport` from
-/// `offline_sync_dio`) — retry/backoff (Phase 3) and conflict resolution
-/// (Phase 4) are still open.
+/// Phase 3 status: `register`, `save`, `delete`, `getAll` are fully
+/// implemented against [LocalStorage]. `sync()` sends queued operations
+/// through a [SyncTransport] and now applies exponential backoff
+/// ([RetryPolicy]) on retriable failures. Conflict resolution (Phase 4)
+/// is still open.
 ///
 /// ```dart
 /// await OfflineSync.initialize(
 ///   storage: DriftLocalStorage(),
 ///   transport: DioSyncTransport(Dio(BaseOptions(baseUrl: 'https://api.example.com'))),
+///   retryPolicy: const RetryPolicy(maxAttempts: 5), // optional, has a default
 /// );
 /// OfflineSync.register<User>(userAdapter);
 /// await OfflineSync.save(user);
@@ -30,6 +32,7 @@ class OfflineSync {
   static bool _initialized = false;
   static LocalStorage? _storage;
   static SyncTransport? _transport;
+  static RetryPolicy _retryPolicy = const RetryPolicy();
   static final Map<Type, SyncAdapter> _adapters = {};
 
   /// Adapters are also keyed by [SyncAdapter.entityName] because [sync]
@@ -39,13 +42,17 @@ class OfflineSync {
 
   /// Opens local storage and runs migrations, and wires up the transport
   /// used by [sync]. Both are injected so `core` never depends on a
-  /// concrete database or HTTP package directly.
+  /// concrete database or HTTP package directly. [retryPolicy] controls
+  /// backoff timing and the retry budget; the default is reasonable for
+  /// most apps — see [RetryPolicy] to tune it.
   static Future<void> initialize({
     required LocalStorage storage,
     required SyncTransport transport,
+    RetryPolicy retryPolicy = const RetryPolicy(),
   }) async {
     _storage = storage;
     _transport = transport;
+    _retryPolicy = retryPolicy;
     await storage.init();
     _initialized = true;
   }
@@ -121,18 +128,22 @@ class OfflineSync {
     return rows.map(adapter.fromJson).toList();
   }
 
-  /// Drains the queue by sending every pending/failed operation through
-  /// the registered [SyncTransport], in the order they were created.
+  /// Drains the queue by sending every operation that's currently
+  /// eligible ([LocalStorage.getPendingOperations]) through the
+  /// registered [SyncTransport], in the order they were created.
   ///
-  /// - On success: the operation is removed from the queue
-  ///   ([LocalStorage.removeOperation]).
-  /// - On failure: the operation is marked [SyncOperationStatus.failed]
-  ///   and its `retryCount` is incremented, but it stays in the queue.
-  ///   Nothing is retried automatically yet — that's Phase 3
-  ///   (retry/backoff). For now, calling [sync] again will simply retry
-  ///   every `failed` operation immediately, since
-  ///   [LocalStorage.getPendingOperations] returns both `pending` and
-  ///   `failed` rows.
+  /// - On success: the operation is removed from the queue.
+  /// - On a **retriable** failure (e.g. timeout, 5xx) with attempts left
+  ///   under [RetryPolicy.maxAttempts]: marked
+  ///   [SyncOperationStatus.failed], `retryCount` incremented, and
+  ///   [SyncOperation.nextRetryAt] pushed out per
+  ///   [RetryPolicy.nextRetryAt]. It's skipped by
+  ///   [LocalStorage.getPendingOperations] until that time passes — so
+  ///   calling [sync] again right away is safe and simply won't resend it
+  ///   yet.
+  /// - On a **non-retriable** failure (e.g. 4xx), or once
+  ///   [RetryPolicy.maxAttempts] is used up: marked
+  ///   [SyncOperationStatus.exhausted]. No longer retried automatically.
   ///
   /// An operation whose `entityName` has no matching registered adapter
   /// is skipped for this call rather than crashing the whole sync — it's
@@ -141,7 +152,8 @@ class OfflineSync {
   static Future<void> sync() async {
     final storage = _requireStorage();
     final transport = _requireTransport();
-    final pending = await storage.getPendingOperations();
+    final now = DateTime.now();
+    final pending = await storage.getPendingOperations(now: now);
 
     for (final op in pending) {
       final adapter = _adaptersByName[op.entityName];
@@ -158,11 +170,28 @@ class OfflineSync {
 
       if (result.isSuccess) {
         await storage.removeOperation(op.id);
-      } else {
+        continue;
+      }
+
+      final newRetryCount = op.retryCount + 1;
+      final canRetry =
+          result.retriable && _retryPolicy.hasAttemptsLeft(newRetryCount);
+
+      if (canRetry) {
         await storage.updateOperationStatus(
           op.id,
           SyncOperationStatus.failed,
-          retryCount: op.retryCount + 1,
+          retryCount: newRetryCount,
+          nextRetryAt: _retryPolicy.nextRetryAt(newRetryCount, now: now),
+        );
+      } else {
+        // Either the failure was non-retriable (retrying the identical
+        // request won't help), or the retry budget is used up — either
+        // way, stop retrying automatically.
+        await storage.updateOperationStatus(
+          op.id,
+          SyncOperationStatus.exhausted,
+          retryCount: newRetryCount,
         );
       }
     }

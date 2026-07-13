@@ -73,6 +73,7 @@ void main() {
       () async {
     final db = AppDatabase.withExecutor(NativeDatabase.memory());
     final storage = DriftLocalStorage(db);
+    final beforeCall = DateTime.now();
 
     await OfflineSync.initialize(
       storage: storage,
@@ -86,16 +87,91 @@ void main() {
 
     await OfflineSync.sync();
 
-    final pending = await storage.getPendingOperations();
-    expect(pending, hasLength(1),
+    // getPendingOperations(now: ...) defaults to "right now" if omitted,
+    // and this op's nextRetryAt is ~5s in the future (default
+    // RetryPolicy.baseDelay), so it correctly won't show up yet.
+    final pendingRightNow = await storage.getPendingOperations();
+    expect(pendingRightNow, isEmpty,
+        reason: 'backoff should hide it until nextRetryAt passes');
+
+    // Query without the time filter (pass a far-future "now") to inspect
+    // the row itself.
+    final scheduled = await storage.getPendingOperations(
+      now: beforeCall.add(const Duration(days: 1)),
+    );
+    expect(scheduled, hasLength(1),
         reason: 'a failed send must not be removed from the queue');
-    expect(pending.first.status, SyncOperationStatus.failed);
-    expect(pending.first.retryCount, 1);
+    expect(scheduled.first.status, SyncOperationStatus.failed);
+    expect(scheduled.first.retryCount, 1);
+    expect(scheduled.first.nextRetryAt, isNotNull);
+    expect(
+      scheduled.first.nextRetryAt!.isAfter(beforeCall),
+      isTrue,
+      reason: 'RetryPolicy.baseDelay should push the next attempt out',
+    );
+  });
+
+  test('sync() marks an operation exhausted once retries run out', () async {
+    final db = AppDatabase.withExecutor(NativeDatabase.memory());
+    final storage = DriftLocalStorage(db);
+
+    await OfflineSync.initialize(
+      storage: storage,
+      transport: const _AlwaysFailsTransport(),
+      // Tiny delay so each failed operation becomes eligible again almost
+      // immediately -- lets the test call sync() repeatedly without
+      // actually waiting minutes for real backoff timers.
+      retryPolicy: const RetryPolicy(
+        baseDelay: Duration(microseconds: 1),
+        maxAttempts: 2,
+      ),
+    );
+    OfflineSync.register<User>(userAdapter);
+
+    await OfflineSync.save(
+      User(id: 'u3', name: 'Karim', updatedAt: DateTime.now()),
+    );
+
+    await OfflineSync.sync(); // attempt 1 -> failed, retryCount 1
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    await OfflineSync.sync(); // attempt 2 -> exhausted, retryCount 2
+
+    final farFuture = await storage.getPendingOperations(
+      now: DateTime.now().add(const Duration(days: 1)),
+    );
+    expect(farFuture, isEmpty,
+        reason: 'exhausted operations must never be returned again');
+  });
+
+  test('sync() sends a non-retriable failure straight to exhausted',
+      () async {
+    final db = AppDatabase.withExecutor(NativeDatabase.memory());
+    final storage = DriftLocalStorage(db);
+
+    await OfflineSync.initialize(
+      storage: storage,
+      transport: const _AlwaysRejectsTransport(),
+    );
+    OfflineSync.register<User>(userAdapter);
+
+    await OfflineSync.save(
+      User(id: 'u4', name: 'Sara', updatedAt: DateTime.now()),
+    );
+
+    await OfflineSync.sync();
+
+    final farFuture = await storage.getPendingOperations(
+      now: DateTime.now().add(const Duration(days: 1)),
+    );
+    expect(farFuture, isEmpty,
+        reason: 'a non-retriable (e.g. 4xx-style) failure skips backoff '
+            'entirely and goes straight to exhausted');
   });
 }
 
 /// Simulates a server/network that always rejects the request — e.g. the
 /// device went offline again mid-sync, or the server returned a 5xx.
+/// Retriable: eligible for backoff and another attempt.
 class _AlwaysFailsTransport implements SyncTransport {
   const _AlwaysFailsTransport();
 
@@ -105,5 +181,20 @@ class _AlwaysFailsTransport implements SyncTransport {
     SyncAdapter adapter,
   ) async {
     return const SyncTransportResult.failure(retriable: true);
+  }
+}
+
+/// Simulates a server that actively rejects the request (e.g. a 422
+/// validation error) — not retriable, since resending identical bytes
+/// won't change the outcome.
+class _AlwaysRejectsTransport implements SyncTransport {
+  const _AlwaysRejectsTransport();
+
+  @override
+  Future<SyncTransportResult> send(
+    SyncOperation operation,
+    SyncAdapter adapter,
+  ) async {
+    return const SyncTransportResult.failure(retriable: false);
   }
 }
