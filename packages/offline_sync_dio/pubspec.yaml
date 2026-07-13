@@ -1,0 +1,25 @@
+name: offline_sync_dio
+description: >
+  Dio-based network transport for offline_sync_core — implements
+  SyncTransport, mapping SyncOperationType to HTTP verbs (POST/PUT/DELETE)
+  against SyncAdapter.endpoint.
+version: 0.0.1
+homepage: https://github.com/<org>/offline_sync
+repository: https://github.com/<org>/offline_sync
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  offline_sync_core:
+    path: ../offline_sync_core
+  dio: ^5.4.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^4.0.0

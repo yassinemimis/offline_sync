@@ -37,7 +37,10 @@ void main() {
     final db = AppDatabase.withExecutor(NativeDatabase.memory());
     final storage = DriftLocalStorage(db);
 
-    await OfflineSync.initialize(storage: storage);
+    await OfflineSync.initialize(
+      storage: storage,
+      transport: const NoopSyncTransport(),
+    );
     OfflineSync.register<User>(userAdapter);
 
     final user = User(id: 'u1', name: 'Yassine', updatedAt: DateTime.now());
@@ -65,4 +68,42 @@ void main() {
     final stillThere = await OfflineSync.getAll<User>();
     expect(stillThere, hasLength(1));
   });
+
+  test('sync() keeps a failed operation queued, marked failed, retry bumped',
+      () async {
+    final db = AppDatabase.withExecutor(NativeDatabase.memory());
+    final storage = DriftLocalStorage(db);
+
+    await OfflineSync.initialize(
+      storage: storage,
+      transport: const _AlwaysFailsTransport(),
+    );
+    OfflineSync.register<User>(userAdapter);
+
+    await OfflineSync.save(
+      User(id: 'u2', name: 'Fatima', updatedAt: DateTime.now()),
+    );
+
+    await OfflineSync.sync();
+
+    final pending = await storage.getPendingOperations();
+    expect(pending, hasLength(1),
+        reason: 'a failed send must not be removed from the queue');
+    expect(pending.first.status, SyncOperationStatus.failed);
+    expect(pending.first.retryCount, 1);
+  });
+}
+
+/// Simulates a server/network that always rejects the request — e.g. the
+/// device went offline again mid-sync, or the server returned a 5xx.
+class _AlwaysFailsTransport implements SyncTransport {
+  const _AlwaysFailsTransport();
+
+  @override
+  Future<SyncTransportResult> send(
+    SyncOperation operation,
+    SyncAdapter adapter,
+  ) async {
+    return const SyncTransportResult.failure(retriable: true);
+  }
 }

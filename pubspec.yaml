@@ -10,6 +10,7 @@ environment:
 workspace:
   - packages/offline_sync_core
   - packages/offline_sync_drift
+  - packages/offline_sync_dio
 
 melos:
   name: offline_sync

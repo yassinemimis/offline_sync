@@ -3,17 +3,21 @@ import 'package:uuid/uuid.dart';
 import '../contracts/local_storage.dart';
 import '../contracts/sync_adapter.dart';
 import '../contracts/sync_operation.dart';
+import '../contracts/sync_transport.dart';
 
 /// Public entry point of the library.
 ///
-/// Phase 1 status: `register`, `save`, `delete`, `getAll` are fully
-/// implemented against [LocalStorage] — local writes and the queue work
-/// end-to-end. `sync()` still only drains the queue locally (marks
-/// operations synced) because it has no network transport yet — that
-/// lands with the `network` module, next.
+/// Phase 2 status: `register`, `save`, `delete`, `getAll` are fully
+/// implemented against [LocalStorage]. `sync()` now actually sends queued
+/// operations through a [SyncTransport] (e.g. `DioSyncTransport` from
+/// `offline_sync_dio`) — retry/backoff (Phase 3) and conflict resolution
+/// (Phase 4) are still open.
 ///
 /// ```dart
-/// await OfflineSync.initialize(storage: DriftLocalStorage());
+/// await OfflineSync.initialize(
+///   storage: DriftLocalStorage(),
+///   transport: DioSyncTransport(Dio(BaseOptions(baseUrl: 'https://api.example.com'))),
+/// );
 /// OfflineSync.register<User>(userAdapter);
 /// await OfflineSync.save(user);
 /// await OfflineSync.sync();
@@ -25,13 +29,23 @@ class OfflineSync {
 
   static bool _initialized = false;
   static LocalStorage? _storage;
+  static SyncTransport? _transport;
   static final Map<Type, SyncAdapter> _adapters = {};
 
-  /// Opens local storage and runs migrations. [storage] is injected so
-  /// `core` never depends on a concrete database package directly —
-  /// pass `DriftLocalStorage()` from `offline_sync_drift`.
-  static Future<void> initialize({required LocalStorage storage}) async {
+  /// Adapters are also keyed by [SyncAdapter.entityName] because [sync]
+  /// only has that string (from the queue row) to work with — it has no
+  /// Dart [Type] to look the adapter up by at that point.
+  static final Map<String, SyncAdapter> _adaptersByName = {};
+
+  /// Opens local storage and runs migrations, and wires up the transport
+  /// used by [sync]. Both are injected so `core` never depends on a
+  /// concrete database or HTTP package directly.
+  static Future<void> initialize({
+    required LocalStorage storage,
+    required SyncTransport transport,
+  }) async {
     _storage = storage;
+    _transport = transport;
     await storage.init();
     _initialized = true;
   }
@@ -40,6 +54,7 @@ class OfflineSync {
   /// before saving/reading instances of that type.
   static void register<T>(SyncAdapter<T> adapter) {
     _adapters[T] = adapter;
+    _adaptersByName[adapter.entityName] = adapter;
   }
 
   /// Saves [entity] to local storage immediately and enqueues a
@@ -106,20 +121,50 @@ class OfflineSync {
     return rows.map(adapter.fromJson).toList();
   }
 
-  /// Drains the queue. Phase 1: no network transport yet, so this only
-  /// marks every pending operation as synced and removes it — enough to
-  /// prove the local write → queue → drain loop end-to-end. Phase 1's
-  /// `network` module replaces the body with real HTTP calls, retry, and
-  /// conflict handling.
+  /// Drains the queue by sending every pending/failed operation through
+  /// the registered [SyncTransport], in the order they were created.
+  ///
+  /// - On success: the operation is removed from the queue
+  ///   ([LocalStorage.removeOperation]).
+  /// - On failure: the operation is marked [SyncOperationStatus.failed]
+  ///   and its `retryCount` is incremented, but it stays in the queue.
+  ///   Nothing is retried automatically yet — that's Phase 3
+  ///   (retry/backoff). For now, calling [sync] again will simply retry
+  ///   every `failed` operation immediately, since
+  ///   [LocalStorage.getPendingOperations] returns both `pending` and
+  ///   `failed` rows.
+  ///
+  /// An operation whose `entityName` has no matching registered adapter
+  /// is skipped for this call rather than crashing the whole sync — it's
+  /// picked up again on the next [sync] call once the adapter is
+  /// registered.
   static Future<void> sync() async {
     final storage = _requireStorage();
+    final transport = _requireTransport();
     final pending = await storage.getPendingOperations();
 
     for (final op in pending) {
-      // TODO(network module): send `op` to `adapters[op.entityName].endpoint`
-      // via HTTP here. On success, remove it. On failure, mark `failed`
-      // and increment retryCount instead of removing.
-      await storage.removeOperation(op.id);
+      final adapter = _adaptersByName[op.entityName];
+      if (adapter == null) {
+        assert(
+          false,
+          'No SyncAdapter registered for entityName "${op.entityName}" '
+          '— skipping queued operation ${op.id} for now.',
+        );
+        continue;
+      }
+
+      final result = await transport.send(op, adapter);
+
+      if (result.isSuccess) {
+        await storage.removeOperation(op.id);
+      } else {
+        await storage.updateOperationStatus(
+          op.id,
+          SyncOperationStatus.failed,
+          retryCount: op.retryCount + 1,
+        );
+      }
     }
   }
 
@@ -137,9 +182,18 @@ class OfflineSync {
   static LocalStorage _requireStorage() {
     if (!_initialized || _storage == null) {
       throw StateError(
-        'Call OfflineSync.initialize(storage: ...) first.',
+        'Call OfflineSync.initialize(storage: ..., transport: ...) first.',
       );
     }
     return _storage!;
+  }
+
+  static SyncTransport _requireTransport() {
+    if (!_initialized || _transport == null) {
+      throw StateError(
+        'Call OfflineSync.initialize(storage: ..., transport: ...) first.',
+      );
+    }
+    return _transport!;
   }
 }
