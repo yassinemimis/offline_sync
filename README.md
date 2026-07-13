@@ -29,6 +29,7 @@ that queue locally; it does not yet call a server (see
 |---|---|---|
 | [`offline_sync_core`](packages/offline_sync_core) | ✅ Stable API | Storage-agnostic contracts + engine |
 | [`offline_sync_drift`](packages/offline_sync_drift) | ✅ Phase 1 done | Drift/SQLite storage adapter |
+| [`offline_sync_dio`](packages/offline_sync_dio) | ✅ Phase 2 done | Network. Make sync() actually |
 | `offline_sync_example` | ⏳ Planned | Demo app |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the foundational decisions and
@@ -40,7 +41,7 @@ why they were made.
       and the public `OfflineSync` API.
 - [x] **Phase 1 — Local persistence.** Drift/SQLite storage: entities table,
       operation queue, soft delete.
-- [ ] **Phase 2 — Network.** Make `sync()` actually send queued operations
+- [x] **Phase 2 — Network.** Make `sync()` actually send queued operations
       to a server (`offline_sync_dio`).
 - [ ] **Phase 3 — Retry & backoff.** Exponential backoff on failed sends,
       using the `retryCount` field already in `SyncOperation`.
