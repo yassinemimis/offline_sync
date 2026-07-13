@@ -17,6 +17,8 @@ class DriftLocalStorage implements LocalStorage {
 
   @override
   Future<void> init() async {
+    // Opening the connection is lazy (see AppDatabase._openConnection) —
+    // this first query is what actually triggers it and runs migrations.
     await _db.customSelect('SELECT 1').get();
   }
 
@@ -105,10 +107,18 @@ class DriftLocalStorage implements LocalStorage {
   }
 
   @override
-  Future<List<SyncOperation>> getPendingOperations() async {
+  Future<List<SyncOperation>> getPendingOperations({DateTime? now}) async {
+    final cutoff = now ?? DateTime.now();
+
+    // pending: never attempted, always eligible.
+    // failed: eligible only once nextRetryAt has passed (or was never
+    // set, defensively).
+    // exhausted rows are excluded on purpose — see LocalStorage docs.
     final rows = await (_db.select(_db.syncOperationsTable)
-          ..where((t) => t.status.equalsValue(SyncOperationStatus.pending) |
-              t.status.equalsValue(SyncOperationStatus.failed))
+          ..where((t) =>
+              t.status.equalsValue(SyncOperationStatus.pending) |
+              (t.status.equalsValue(SyncOperationStatus.failed) &
+                  (t.nextRetryAt.isNull() | t.nextRetryAt.isSmallerOrEqualValue(cutoff))))
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
         .get();
 
@@ -122,6 +132,7 @@ class DriftLocalStorage implements LocalStorage {
               createdAt: row.createdAt,
               status: row.status,
               retryCount: row.retryCount,
+              nextRetryAt: row.nextRetryAt,
             ))
         .toList();
   }
@@ -131,12 +142,17 @@ class DriftLocalStorage implements LocalStorage {
     String operationId,
     SyncOperationStatus status, {
     int? retryCount,
+    DateTime? nextRetryAt,
   }) async {
     await (_db.update(_db.syncOperationsTable)
           ..where((t) => t.id.equals(operationId)))
         .write(SyncOperationsTableCompanion(
       status: Value(status),
       retryCount: retryCount == null ? const Value.absent() : Value(retryCount),
+      // Explicit Value(...) (not Value.absent()) even when nextRetryAt is
+      // null: a transition to `exhausted`/`synced` must clear any
+      // previously scheduled retry time, not leave a stale one behind.
+      nextRetryAt: Value(nextRetryAt),
     ));
   }
 

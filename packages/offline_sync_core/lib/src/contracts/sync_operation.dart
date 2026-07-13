@@ -7,14 +7,23 @@ enum SyncOperationType { create, update, delete }
 
 /// Lifecycle status of a queued operation.
 enum SyncOperationStatus {
-  /// Waiting to be sent.
+  /// Waiting to be sent for the first time.
   pending,
 
   /// Currently being sent to the server.
   inProgress,
 
-  /// Send failed; will be retried (Phase 2 - retry/backoff).
+  /// A send attempt failed but is still within the retry budget
+  /// ([RetryPolicy.maxAttempts]). Picked up again once [SyncOperation.
+  /// nextRetryAt] has passed.
   failed,
+
+  /// Every retry attempt has been used up ([RetryPolicy.maxAttempts])
+  /// without success, or the server rejected the operation in a way that
+  /// will never succeed on its own (a non-retriable [SyncTransportResult],
+  /// e.g. a 4xx). No longer retried automatically — needs manual
+  /// intervention (inspect and re-enqueue, or discard).
+  exhausted,
 
   /// Sent and acknowledged by the server. Safe to remove from the queue.
   synced,
@@ -35,6 +44,7 @@ class SyncOperation {
     required this.createdAt,
     this.status = SyncOperationStatus.pending,
     this.retryCount = 0,
+    this.nextRetryAt,
   });
 
   /// Queue-row id (not the entity id).
@@ -56,13 +66,19 @@ class SyncOperation {
 
   final SyncOperationStatus status;
 
-  /// Incremented on every failed send attempt; consumed by the retry/
-  /// backoff strategy in Phase 2.
+  /// Incremented on every failed send attempt; consumed by [RetryPolicy].
   final int retryCount;
+
+  /// Earliest time this operation should be attempted again, set by
+  /// [RetryPolicy.nextRetryAt] after a retriable failure. `null` for
+  /// operations that have never failed (still [SyncOperationStatus.
+  /// pending]) — those are always eligible immediately.
+  final DateTime? nextRetryAt;
 
   SyncOperation copyWith({
     SyncOperationStatus? status,
     int? retryCount,
+    DateTime? nextRetryAt,
   }) {
     return SyncOperation(
       id: id,
@@ -73,6 +89,7 @@ class SyncOperation {
       createdAt: createdAt,
       status: status ?? this.status,
       retryCount: retryCount ?? this.retryCount,
+      nextRetryAt: nextRetryAt ?? this.nextRetryAt,
     );
   }
 }

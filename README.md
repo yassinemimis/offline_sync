@@ -2,15 +2,20 @@
 
 > Offline-First for Flutter, as easy as adding Dio or Riverpod.
 
-**Status:** 🚧 Active development — local persistence and the sync queue are
-working end-to-end on Drift/SQLite ([`offline_sync_drift`](packages/offline_sync_drift)).
-Network sync (actually sending queued operations to a server) is next.
-Not yet published to pub.dev.
+**Status:** 🚧 Active development — local persistence, the sync queue,
+network sync, and now retry/backoff are working end-to-end
+([`offline_sync_drift`](packages/offline_sync_drift) +
+[`offline_sync_dio`](packages/offline_sync_dio)). Conflict resolution is
+next. Not yet published to pub.dev.
 
 ## Target usage
 
 ```dart
-await OfflineSync.initialize();
+await OfflineSync.initialize(
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(Dio(BaseOptions(baseUrl: 'https://api.example.com'))),
+  retryPolicy: const RetryPolicy(), // optional — this is the default
+);
 
 OfflineSync.register<User>(userAdapter);
 
@@ -18,10 +23,15 @@ await OfflineSync.save(user);
 await OfflineSync.sync();
 ```
 
-Today, `save()` writes to local storage and enqueues the operation
-immediately — it never blocks on the network. `sync()` currently drains
-that queue locally; it does not yet call a server (see
-[Roadmap](#roadmap)).
+`save()` writes to local storage and enqueues the operation immediately —
+it never blocks on the network. `sync()` sends every eligible queued
+operation through the registered `SyncTransport`: on success the
+operation is removed from the queue; on a retriable failure it's marked
+`failed` and scheduled for a later attempt with exponential backoff
+(`RetryPolicy`); once the retry budget (`maxAttempts`) is used up, or the
+failure was non-retriable (e.g. a 4xx), it's marked `exhausted` and
+stops being retried automatically. Conflict resolution lands in
+[Phase 4](#roadmap).
 
 ## Packages
 
@@ -29,7 +39,7 @@ that queue locally; it does not yet call a server (see
 |---|---|---|
 | [`offline_sync_core`](packages/offline_sync_core) | ✅ Stable API | Storage-agnostic contracts + engine |
 | [`offline_sync_drift`](packages/offline_sync_drift) | ✅ Phase 1 done | Drift/SQLite storage adapter |
-| [`offline_sync_dio`](packages/offline_sync_dio) | ✅ Phase 2 done | Network. Make sync() actually |
+| [`offline_sync_dio`](packages/offline_sync_dio) | ✅ Phase 2 done | Dio-based network transport |
 | `offline_sync_example` | ⏳ Planned | Demo app |
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the foundational decisions and
@@ -41,10 +51,12 @@ why they were made.
       and the public `OfflineSync` API.
 - [x] **Phase 1 — Local persistence.** Drift/SQLite storage: entities table,
       operation queue, soft delete.
-- [x] **Phase 2 — Network.** Make `sync()` actually send queued operations
-      to a server (`offline_sync_dio`).
-- [ ] **Phase 3 — Retry & backoff.** Exponential backoff on failed sends,
-      using the `retryCount` field already in `SyncOperation`.
+- [x] **Phase 2 — Network.** `sync()` sends queued operations through a
+      `SyncTransport`; `offline_sync_dio` maps `SyncOperationType` to
+      POST/PUT/DELETE.
+- [x] **Phase 3 — Retry & backoff.** Exponential backoff (`RetryPolicy`)
+      on retriable failures; a `maxAttempts` budget after which an
+      operation is marked `exhausted` instead of retried forever.
 - [ ] **Phase 4 — Conflict resolution.** Server Wins / Client Wins /
       Last-Write-Wins / Manual, based on the `version` field already in
       `EntitiesTable`.

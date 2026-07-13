@@ -9,6 +9,7 @@ class SyncOperationsTable extends Table {
   /// Queue-row id (uuid), not the entity id.
   TextColumn get id => text()();
 
+  /// See `EntitiesTable.entityType` for why this isn't named `entityName`.
   TextColumn get entityType => text().named('entityName')();
 
   TextColumn get entityId => text()();
@@ -27,6 +28,12 @@ class SyncOperationsTable extends Table {
       .withDefault(Constant(SyncOperationStatus.pending.name))();
 
   IntColumn get retryCount => integer().withDefault(const Constant(0))();
+
+  /// Earliest time this operation is eligible to be retried. `NULL` for
+  /// rows that haven't failed yet (still `pending`) — those are always
+  /// eligible. Set by `RetryPolicy.nextRetryAt` on a retriable failure;
+  /// see `offline_sync_core`'s `OfflineSync.sync()`.
+  DateTimeColumn get nextRetryAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};

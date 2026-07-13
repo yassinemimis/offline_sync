@@ -15,7 +15,7 @@ Future<void> main() async {
       // Android Emulator
       baseUrl: "http://10.0.2.2:3000",
 
-      // إذا كنت تستعمل هاتفاً حقيقياً:
+   
       // baseUrl: "http://192.168.1.10:3000",
     ),
   );
@@ -23,6 +23,10 @@ Future<void> main() async {
   await OfflineSync.initialize(
     storage: DriftLocalStorage(),
     transport: DioSyncTransport(dio),
+    retryPolicy: const RetryPolicy(
+    baseDelay: Duration(seconds: 2), 
+    maxAttempts: 3,
+  ),
   );
 
   OfflineSync.register(todoAdapter);
