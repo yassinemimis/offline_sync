@@ -1,3 +1,4 @@
+# Flutter / Dart
 .dart_tool/
 .packages
 build/
@@ -6,7 +7,22 @@ build/
 pubspec.lock
 *.g.dart
 *.freezed.dart
+
+# IDE
 .idea/
 .vscode/
 *.iml
+
+# Melos
 melos.log
+
+# Node.js
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+**/.env
+**/.env.local
