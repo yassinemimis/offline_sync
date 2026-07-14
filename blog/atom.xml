@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?><?xml-stylesheet type="text/xsl" href="atom.xsl"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
-    <id>https://your-docusaurus-site.example.com/blog</id>
+    <id>https://yassinemimis.github.io/offline_sync/blog</id>
     <title>Offline Sync Blog</title>
     <updated>2026-07-14T00:00:00.000Z</updated>
     <generator>https://github.com/jpmonette/feed</generator>
-    <link rel="alternate" href="https://your-docusaurus-site.example.com/blog"/>
+    <link rel="alternate" href="https://yassinemimis.github.io/offline_sync/blog"/>
     <subtitle>Offline Sync Blog</subtitle>
-    <icon>https://your-docusaurus-site.example.com/img/favicon.ico</icon>
+    <icon>https://yassinemimis.github.io/offline_sync/img/favicon.ico</icon>
     <entry>
         <title type="html"><![CDATA[Why Offline-First Is Becoming Mandatory for Modern Mobile Applications]]></title>
-        <id>https://your-docusaurus-site.example.com/blog/why-offline-first-mandatory</id>
-        <link href="https://your-docusaurus-site.example.com/blog/why-offline-first-mandatory"/>
+        <id>https://yassinemimis.github.io/offline_sync/blog/why-offline-first-mandatory</id>
+        <link href="https://yassinemimis.github.io/offline_sync/blog/why-offline-first-mandatory"/>
         <updated>2026-07-14T00:00:00.000Z</updated>
         <summary type="html"><![CDATA[For many years, mobile applications were designed with one simple assumption:]]></summary>
         <content type="html"><![CDATA[<p>For many years, mobile applications were designed with one simple assumption:</p>
@@ -35,7 +35,7 @@
 <hr>
 <h1>What Is Offline-First?</h1>
 <p>Offline-First is an architectural approach where the <strong>local database becomes the primary source of truth</strong> for user interactions.</p>
-<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="the-shift-in-thinking">The Shift in Thinking<a href="https://your-docusaurus-site.example.com/blog/why-offline-first-mandatory#the-shift-in-thinking" class="hash-link" aria-label="Direct link to The Shift in Thinking" title="Direct link to The Shift in Thinking" translate="no">​</a></h2>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="the-shift-in-thinking">The Shift in Thinking<a href="https://yassinemimis.github.io/offline_sync/blog/why-offline-first-mandatory#the-shift-in-thinking" class="hash-link" aria-label="Direct link to The Shift in Thinking" title="Direct link to The Shift in Thinking" translate="no">​</a></h2>
 <p>Instead of the traditional architecture:</p>
 <div class="language-text codeBlockContainer_Ckt0 theme-code-block" style="--prism-color:#393A34;--prism-background-color:#f6f8fa"><div class="codeBlockContent_QJqH"><pre tabindex="0" class="prism-code language-text codeBlock_bY9V thin-scrollbar" style="color:#393A34;background-color:#f6f8fa"><code class="codeBlockLines_e6Vv"><div class="token-line" style="color:#393A34"><span class="token plain">┌────────┐      ┌─────────┐      ┌────────┐</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">│  User  │ ───&gt; │ Network │ ───&gt; │ Server │</span><br></div><div class="token-line" style="color:#393A34"><span class="token plain">└────────┘      └─────────┘      └────────┘</span><br></div></code></pre></div></div>
 <p>Offline-First applications use:</p>
@@ -70,7 +70,7 @@
 <hr>
 <h1>Synchronization Is Harder Than It Looks</h1>
 <p>Building a reliable Offline-First system requires solving several difficult engineering problems.</p>
-<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="conflict-resolution">Conflict Resolution<a href="https://your-docusaurus-site.example.com/blog/why-offline-first-mandatory#conflict-resolution" class="hash-link" aria-label="Direct link to Conflict Resolution" title="Direct link to Conflict Resolution" translate="no">​</a></h2>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="conflict-resolution">Conflict Resolution<a href="https://yassinemimis.github.io/offline_sync/blog/why-offline-first-mandatory#conflict-resolution" class="hash-link" aria-label="Direct link to Conflict Resolution" title="Direct link to Conflict Resolution" translate="no">​</a></h2>
 <p>Imagine two devices editing the same record.</p>
 <p><strong>Scenario</strong></p>
 <p>A doctor updates a patient's prescription on a tablet while offline.</p>
@@ -87,7 +87,7 @@
 </ul>
 <p>Choosing the correct strategy depends entirely on the application.</p>
 <hr>
-<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="partial-synchronization-failures">Partial Synchronization Failures<a href="https://your-docusaurus-site.example.com/blog/why-offline-first-mandatory#partial-synchronization-failures" class="hash-link" aria-label="Direct link to Partial Synchronization Failures" title="Direct link to Partial Synchronization Failures" translate="no">​</a></h2>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="partial-synchronization-failures">Partial Synchronization Failures<a href="https://yassinemimis.github.io/offline_sync/blog/why-offline-first-mandatory#partial-synchronization-failures" class="hash-link" aria-label="Direct link to Partial Synchronization Failures" title="Direct link to Partial Synchronization Failures" translate="no">​</a></h2>
 <p>Imagine synchronizing <strong>500 records</strong>.</p>
 <ul>
 <li class="">The first 300 succeed.</li>
@@ -102,7 +102,7 @@
 <li class="">How do we prevent duplicate operations?</li>
 </ul>
 <hr>
-<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="maintaining-data-consistency">Maintaining Data Consistency<a href="https://your-docusaurus-site.example.com/blog/why-offline-first-mandatory#maintaining-data-consistency" class="hash-link" aria-label="Direct link to Maintaining Data Consistency" title="Direct link to Maintaining Data Consistency" translate="no">​</a></h2>
+<h2 class="anchor anchorTargetStickyNavbar_Vzrq" id="maintaining-data-consistency">Maintaining Data Consistency<a href="https://yassinemimis.github.io/offline_sync/blog/why-offline-first-mandatory#maintaining-data-consistency" class="hash-link" aria-label="Direct link to Maintaining Data Consistency" title="Direct link to Maintaining Data Consistency" translate="no">​</a></h2>
 <p>Offline applications are distributed systems.</p>
 <p>They must manage:</p>
 <ul>
