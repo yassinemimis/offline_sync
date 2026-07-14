@@ -12,18 +12,18 @@ command:
 scripts:
   analyze:
     run: melos exec -- flutter analyze
-    description: تشغيل الـ analyzer على كل الحزم
+    description: Run the analyzer for all packages
 
   test:
     run: melos exec -- flutter test
-    description: تشغيل الاختبارات على كل حزمة فيها مجلد test
+    description: Run tests for every package that contains a test directory
     packageFilters:
       dirExists: test
 
   format:
     run: melos exec -- dart format . --set-exit-if-changed
-    description: فحص التنسيق على كل الحزم
+    description: Check code formatting across all packages
 
   format:fix:
     run: melos exec -- dart format .
-    description: تصحيح التنسيق تلقائيًا
+    description: Automatically fix code formatting

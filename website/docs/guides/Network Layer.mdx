@@ -1,0 +1,81 @@
+---
+id: network-layer
+title: Network Layer
+sidebar_position: 2
+description: How Offline Sync sends queued operations to your backend through a pluggable network layer.
+---
+
+# Network Layer
+
+The **Network Layer** is responsible for taking operations out of the [Queue Engine](/docs/guides/queue-engine) and delivering them to the backend. It is fully pluggable through [Network Adapters](/docs/adapters/network-adapters), so the same sync logic works whether you talk to a REST API, GraphQL, Firebase, or Supabase.
+
+## Responsibilities
+
+- Translate a queued operation into a concrete network request.
+- Execute the request through the configured adapter (e.g. [Dio](/docs/adapters/network-adapters/dio)).
+- Report success, failure, or a conflict back to the Sync Engine.
+- Respect [Connectivity Detection](/docs/guides/connectivity-detection) — no requests are attempted while offline.
+
+## Basic Setup
+
+```dart
+OfflineSync.configure(
+  network: DioNetworkAdapter(
+    baseUrl: 'https://api.example.com',
+  ),
+);
+```
+
+Swapping the backend only means swapping the adapter — the rest of your app code stays unchanged:
+
+```dart
+OfflineSync.configure(
+  network: SupabaseNetworkAdapter(
+    client: supabaseClient,
+  ),
+);
+```
+
+## Request Lifecycle
+
+1. The Queue Engine dequeues an operation.
+2. The Network Layer maps it to a request (e.g. `POST /users`, `PATCH /users/:id`, `DELETE /users/:id`).
+3. The request is sent through the active adapter.
+4. The response is classified as:
+   - **Success** → operation removed from the queue.
+   - **Recoverable failure** (timeout, 5xx) → passed to the [Retry Strategy](/docs/guides/retry-strategy).
+   - **Conflict** (409, version mismatch) → passed to Conflict Resolution.
+   - **Permanent failure** (4xx other than conflict) → operation is marked as failed and surfaced to the app.
+
+## Custom Adapters
+
+You can implement your own adapter by conforming to the core network contract:
+
+```dart
+class MyNetworkAdapter implements NetworkAdapter {
+  @override
+  Future<SyncResponse> send(SyncRequest request) async {
+    // your custom transport logic
+  }
+}
+```
+
+## Timeouts and Headers
+
+```dart
+OfflineSync.configure(
+  network: DioNetworkAdapter(
+    baseUrl: 'https://api.example.com',
+    timeout: const Duration(seconds: 10),
+    defaultHeaders: {
+      'Authorization': 'Bearer <token>',
+    },
+  ),
+);
+```
+
+## Related
+
+- [Queue Engine](/docs/guides/queue-engine)
+- [Retry Strategy](/docs/guides/retry-strategy)
+- [Network Adapters](/docs/adapters/network-adapters)

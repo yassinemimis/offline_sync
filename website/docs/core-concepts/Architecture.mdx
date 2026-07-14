@@ -1,0 +1,348 @@
+---
+sidebar_position: 1
+---
+# Architecture
+
+Offline Sync follows a modular and extensible architecture designed around the principles of **Offline-First**, **Separation of Concerns**, and **Pluggability**.
+
+The framework separates synchronization responsibilities into independent modules, allowing each component to evolve without affecting the others.
+
+---
+
+# High-Level Architecture
+
+```
+                    Flutter Application
+                           │
+                           ▼
+                 Offline Sync Public API
+                           │
+ ┌───────────────────────────────────────────────────────────┐
+ │                   offline_sync_core                       │
+ └───────────────────────────────────────────────────────────┘
+        │          │          │          │          │
+        ▼          ▼          ▼          ▼          ▼
+  Local Storage   Queue   Network   Sync Engine   Logger
+        │                      │
+        ▼                      ▼
+ Database Adapter      Conflict Resolver
+        │                      │
+        └──────────────┬───────┘
+                       ▼
+              Background Worker
+                       │
+                       ▼
+               Remote Backend API
+```
+
+---
+
+# Core Principles
+
+Offline Sync is built around five fundamental principles.
+
+## 1. Local First
+
+Every operation is executed locally before communicating with the server.
+
+The local database is always the primary source of truth during execution.
+
+```
+User Action
+      │
+      ▼
+Local Database
+```
+
+---
+
+## 2. Queue-Based Synchronization
+
+Operations are never sent directly to the backend.
+
+Instead, they are transformed into synchronization jobs.
+
+```
+Create User
+
+↓
+
+Queue
+
+↓
+
+Sync Later
+```
+
+This guarantees that no operation is lost.
+
+---
+
+## 3. Eventual Consistency
+
+The local database and the remote server may temporarily differ.
+
+The synchronization engine ensures that both eventually converge toward the same state.
+
+```
+Device A
+
+↓
+
+Sync
+
+↓
+
+Server
+
+↓
+
+Sync
+
+↓
+
+Device B
+```
+
+---
+
+## 4. Modular Design
+
+Each subsystem has a single responsibility.
+
+| Module | Responsibility |
+|---------|----------------|
+| Core | Public API |
+| Storage | Local persistence |
+| Queue | Pending operations |
+| Network | HTTP communication |
+| Sync Engine | Orchestrates synchronization |
+| Conflict Resolver | Handles conflicts |
+| Retry Engine | Retries failed requests |
+| Logger | Observability |
+| Background Worker | Background synchronization |
+
+---
+
+## 5. Extensibility
+
+Every component can be replaced.
+
+Developers may use:
+
+- Drift
+- SQLite
+- Hive
+- Isar
+
+or
+
+- Dio
+- GraphQL
+- Firebase
+- Supabase
+
+without changing the framework API.
+
+---
+
+# Package Structure
+
+```
+offline_sync/
+
+packages/
+
+├── offline_sync_core
+│
+├── offline_sync_drift
+│
+├── offline_sync_dio
+│
+├── offline_sync_hive
+│
+├── offline_sync_isar
+│
+├── offline_sync_graphql
+│
+├── offline_sync_firebase
+│
+├── offline_sync_supabase
+│
+├── offline_sync_cli
+│
+├── offline_sync_devtools
+│
+├── offline_sync_ui
+│
+└── offline_sync_example
+```
+
+---
+
+# Request Lifecycle
+
+Every operation follows exactly the same lifecycle.
+
+```
+User
+
+↓
+
+OfflineSync.save()
+
+↓
+
+Serialize Model
+
+↓
+
+Local Database
+
+↓
+
+Queue
+
+↓
+
+Return Success
+
+↓
+
+Wait for Connectivity
+
+↓
+
+Sync Engine
+
+↓
+
+HTTP Request
+
+↓
+
+Success
+
+↓
+
+Remove Queue Entry
+```
+
+The user never waits for the server.
+
+---
+
+# Synchronization Lifecycle
+
+```
+Offline
+
+↓
+
+Store Locally
+
+↓
+
+Queue Operation
+
+↓
+
+Internet Available
+
+↓
+
+Retry Pending Jobs
+
+↓
+
+Resolve Conflicts
+
+↓
+
+Update Local Database
+
+↓
+
+Synchronization Completed
+```
+
+---
+
+# Layer Responsibilities
+
+## Public API
+
+Exposes a clean API for developers.
+
+```dart
+await OfflineSync.save(user);
+```
+
+---
+
+## Storage Layer
+
+Responsible for:
+
+- Local persistence
+- Metadata
+- Transactions
+- Serialization
+
+---
+
+## Queue Layer
+
+Responsible for:
+
+- Pending operations
+- Ordering
+- Retry counters
+- Synchronization status
+
+---
+
+## Network Layer
+
+Responsible for:
+
+- HTTP requests
+- Authentication
+- Serialization
+- Timeouts
+
+---
+
+## Synchronization Engine
+
+Responsible for:
+
+- Uploading changes
+- Downloading updates
+- Conflict detection
+- Retry orchestration
+
+---
+
+## Conflict Resolver
+
+Implements different conflict strategies.
+
+- Server Wins
+- Client Wins
+- Last Update Wins
+- Manual Resolution
+
+---
+
+## Logger
+
+Records synchronization events for debugging and monitoring.
+
+---
+
+# Why This Architecture?
+
+Instead of combining multiple unrelated libraries manually, Offline Sync provides a unified synchronization layer that coordinates local storage, networking, retries, conflict resolution, and background execution through a single, consistent API.
+
+This architecture keeps business logic independent from synchronization logic, making applications easier to build, maintain, and scale.

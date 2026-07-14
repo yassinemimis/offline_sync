@@ -1,0 +1,120 @@
+---
+sidebar_position: 1
+title: Introduction
+slug: /intro
+---
+
+# Welcome to the Offline Sync Wiki
+
+**Offline Sync** is an open-source framework for building **Offline-First Flutter applications**.
+
+Instead of forcing developers to implement synchronization logic from scratch for every project, Offline Sync provides a modular architecture that handles local persistence, synchronization, retries, conflict resolution, and background processing through a clean and extensible API.
+
+---
+
+## Vision
+
+Our goal is to make **Offline-First development** as simple as using **Dio** for networking or **Riverpod** for state management.
+
+Developers should focus on **business logic**, not synchronization.
+
+Instead of writing thousands of lines of synchronization code, developers should simply write:
+
+```dart
+await OfflineSync.save(user);
+```
+
+The framework automatically handles:
+
+- 💾 Local persistence
+- 📦 Synchronization queue
+- 🔄 Automatic synchronization
+- 🔁 Retry strategies
+- ⚖️ Conflict resolution
+- 🔋 Background synchronization
+- 📊 Logging
+- 🔒 Data integrity
+
+---
+
+## Why Offline Sync?
+
+Offline synchronization is one of the most difficult parts of mobile application development.
+
+Almost every company eventually rebuilds the same infrastructure:
+
+- SQLite (or another local database)
+- Synchronization queue
+- Connectivity monitoring
+- Retry mechanisms
+- Background workers
+- Conflict resolution
+- Logging
+- Data consistency
+
+Offline Sync unifies all these components into a single, modular framework designed specifically for Flutter.
+
+---
+
+## Core Principles
+
+Offline Sync is built around a few simple principles:
+
+- **Offline-First** by design
+- **Local database is the source of truth**
+- **Clean Architecture**
+- **Dependency Inversion**
+- **Modular packages**
+- **Highly extensible**
+- **Production-ready**
+- **Simple and intuitive API**
+
+---
+
+## Architecture Overview
+
+```text
+Flutter Application
+        │
+        ▼
+ Offline Sync Kit
+        │
+ ┌──────┴──────┐
+ │             │
+ ▼             ▼
+Local DB    HTTP Transport
+ │             │
+ └──────┬──────┘
+        ▼
+ Synchronization Queue
+        │
+        ▼
+ Retry & Conflict Resolution
+```
+
+---
+
+## Current Roadmap
+
+### ✅ Completed
+
+- Phase 0 — Core Contracts
+- Phase 1 — Local Storage
+- Phase 2 — Network Synchronization
+- Phase 3 — Retry & Backoff
+
+### 🚧 Coming Next
+
+- Phase 4 — Conflict Resolution
+- Background Synchronization
+- Sync Events
+- Additional Storage Providers
+- Additional Network Transports
+
+---
+
+## Next Steps
+
+Ready to build your first offline-first application?
+
+Continue with the **Getting Started** guide to install Offline Sync and create your first synchronized entity in just a few minutes.
