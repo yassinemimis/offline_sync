@@ -35,6 +35,10 @@ class SyncOperationsTable extends Table {
   /// see `offline_sync_core`'s `OfflineSync.sync()`.
   DateTimeColumn get nextRetryAt => dateTime().nullable()();
 
+  /// The optimistic-concurrency baseline this operation was built
+  /// against — see `SyncOperation.localVersion`.
+  IntColumn get localVersion => integer().withDefault(const Constant(0))();
+  
   @override
   Set<Column> get primaryKey => {id};
 }

@@ -8,3 +8,4 @@ export 'src/contracts/sync_transport.dart';
 export 'src/engine/offline_sync.dart';
 export 'src/retry/retry_policy.dart';
 export 'src/transport/noop_sync_transport.dart';
+export 'src/conflict/conflict_resolver.dart';

@@ -1,73 +1,65 @@
-const express = require("express");
-const cors = require("cors");
-
+const express = require('express');
 const app = express();
-
-app.use(cors());
 app.use(express.json());
 
-// Logger Middleware
+// Logger middleware — يطبع كل request (خليه زي ما هو عندك إذا موجود مسبقًا)
 app.use((req, res, next) => {
-    const now = new Date().toLocaleTimeString();
-
-    console.log("=================================");
-    console.log(`[${now}] ${req.method} ${req.originalUrl}`);
-
-    if (Object.keys(req.body).length > 0) {
-        console.log("Body:");
-        console.log(req.body);
-    }
-
-    next();
+  console.log(`${new Date().toISOString()}  ${req.method} ${req.path}`, req.body);
+  next();
 });
 
-const todos = [];
+let todos = []; // كل عنصر فيه _version يبدأ من 1
 
-app.get("/", (req, res) => {
-    res.send("Offline Sync Example API");
+app.get('/todos', (req, res) => {
+  // ما نرجع _version للقراءة العادية — التطبيق ما يحتاجه إلا وقت التعارض
+  res.json(todos.map(({ _version, ...rest }) => rest));
 });
 
-app.get("/todos", (req, res) => {
-    res.json(todos);
+app.post('/todos', (req, res) => {
+  const todo = { ...req.body, _version: 1 };
+  todos.push(todo);
+  console.log(`  → created ${todo.id} @ v1`);
+  res.status(201).json(todo);
 });
 
-app.post("/todos", (req, res) => {
-    todos.push(req.body);
+app.put('/todos/:id', (req, res) => {
+  const index = todos.findIndex((t) => t.id === req.params.id);
+  if (index === -1) return res.sendStatus(404);
 
-    console.log("Todo created.");
+  const current = todos[index];
+  const incomingVersion = req.body._version;
 
-    res.status(201).json(req.body);
+  if (incomingVersion !== current._version) {
+    console.log(
+      `  ⚠ conflict on ${req.params.id}: client based on v${incomingVersion}, server is at v${current._version}`
+    );
+    return res.status(409).json(current);
+  }
+
+  const { _version, ...payload } = req.body;
+  const updated = { ...payload, id: req.params.id, _version: current._version + 1 };
+  todos[index] = updated;
+  console.log(`  → updated ${req.params.id} → v${updated._version}`);
+  res.json(updated);
 });
 
-app.put("/todos/:id", (req, res) => {
-    const index = todos.findIndex(t => t.id === req.params.id);
+app.delete('/todos/:id', (req, res) => {
+  const index = todos.findIndex((t) => t.id === req.params.id);
+  if (index === -1) return res.sendStatus(404);
 
-    if (index === -1)
-        return res.sendStatus(404);
+  const current = todos[index];
+  const incomingVersion = req.body?._version;
 
-    todos[index] = req.body;
+  if (incomingVersion !== current._version) {
+    console.log(
+      `  ⚠ conflict on delete ${req.params.id}: client based on v${incomingVersion}, server is at v${current._version}`
+    );
+    return res.status(409).json(current);
+  }
 
-    console.log("Todo updated.");
-
-    res.json(req.body);
+  todos.splice(index, 1);
+  console.log(`  → deleted ${req.params.id}`);
+  res.sendStatus(204);
 });
 
-app.delete("/todos/:id", (req, res) => {
-    const index = todos.findIndex(t => t.id === req.params.id);
-
-    if (index === -1)
-        return res.sendStatus(404);
-
-    todos.splice(index, 1);
-
-    console.log("Todo deleted.");
-
-    res.sendStatus(204);
-});
-
-app.listen(3000, () => {
-    console.log("=================================");
-    console.log("🚀 Offline Sync API");
-    console.log("Listening on http://localhost:3000");
-    console.log("=================================");
-});
+app.listen(3000, () => console.log('Backend listening on http://localhost:3000'));

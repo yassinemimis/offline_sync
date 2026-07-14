@@ -21,13 +21,17 @@ Future<void> main() async {
   );
 
   await OfflineSync.initialize(
-    storage: DriftLocalStorage(),
-    transport: DioSyncTransport(dio),
-    retryPolicy: const RetryPolicy(
-    baseDelay: Duration(seconds: 2), 
-    maxAttempts: 3,
-  ),
-  );
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(dio),
+  retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 2), maxAttempts: 3),
+  onConflict: (conflict, winningData) {
+    debugPrint(
+      '⚠ Conflict resolved for ${conflict.entityName}/${conflict.entityId}: '
+      'local(v${conflict.localVersion}) vs server(v${conflict.serverVersion}) '
+      '→ winner: ${identical(winningData, conflict.serverData) ? "server" : "client"}',
+    );
+  },
+);
 
   OfflineSync.register(todoAdapter);
 

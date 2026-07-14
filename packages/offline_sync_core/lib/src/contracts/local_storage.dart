@@ -2,37 +2,61 @@ import 'sync_operation.dart';
 
 /// Storage contract implemented by concrete database packages
 /// (e.g. `offline_sync_drift`, later `offline_sync_isar`).
-///
-/// `core` never talks to SQLite/Isar/Hive directly — it only depends on
-/// this interface. This is what keeps decision #1 in ARCHITECTURE.md real:
-/// swapping the storage engine later means writing a new [LocalStorage]
-/// implementation, not touching `core`.
 abstract class LocalStorage {
-  /// Opens the database, runs migrations. Called once from
-  /// `OfflineSync.initialize()`.
   Future<void> init();
 
   // ---- Entities ----
 
   /// Inserts or updates the JSON snapshot of an entity.
-  Future<void> saveEntity({
+  ///
+  /// IMPORTANT: this does **not** bump `version`. `version` means "the
+  /// version last confirmed with the server", not a count of local edits
+  /// — bumping it on every local write would break optimistic concurrency
+  /// (the client would claim a baseline the server never acknowledged).
+  /// Returns the entity's *current* version unchanged, so the caller can
+  /// attach it to the queued operation as `SyncOperation.localVersion`.
+  /// New entities start at version `0`.
+  Future<int> saveEntity({
     required String entityName,
     required String entityId,
     required Map<String, dynamic> data,
     required DateTime updatedAt,
   });
 
-  /// Soft-deletes an entity (see ARCHITECTURE.md — decision #5).
-  Future<void> softDeleteEntity({
+  /// Soft-deletes an entity (ARCHITECTURE.md decision #5). Same version
+  /// semantics as [saveEntity]: returns the current baseline, unchanged.
+  Future<int> softDeleteEntity({
     required String entityName,
     required String entityId,
   });
 
-  /// Permanently removes an entity row. Only called after the server has
+  /// Permanently removes a row. Only called after the server has
   /// acknowledged a delete.
   Future<void> hardDeleteEntity({
     required String entityName,
     required String entityId,
+  });
+
+  /// Called after a create/update operation is confirmed synced. Bumps
+  /// `version` by exactly one (mirroring the server's own
+  /// increment-per-write convention) and marks the row `isSynced`.
+  Future<void> markSynced({
+    required String entityName,
+    required String entityId,
+  });
+
+  /// Writes back the result of conflict resolution: [data] becomes the
+  /// row's content, [version] becomes its new baseline (the server's
+  /// version at the time of the conflict), and [isSynced] reflects
+  /// whether that content still needs pushing (`false` if the winning
+  /// data was the client's and hasn't reached the server yet).
+  Future<void> reconcileEntity({
+    required String entityName,
+    required String entityId,
+    required Map<String, dynamic> data,
+    required int version,
+    required DateTime updatedAt,
+    required bool isSynced,
   });
 
   Future<Map<String, dynamic>?> getEntity({
@@ -40,27 +64,14 @@ abstract class LocalStorage {
     required String entityId,
   });
 
-  /// All non-deleted entities of [entityName].
   Future<List<Map<String, dynamic>>> getAllEntities(String entityName);
 
   // ---- Queue ----
 
   Future<void> enqueueOperation(SyncOperation operation);
 
-  /// Operations ready to be attempted right now, oldest first: every
-  /// [SyncOperationStatus.pending] row, plus [SyncOperationStatus.failed]
-  /// rows whose [SyncOperation.nextRetryAt] is `null` or has already
-  /// passed relative to [now]. [SyncOperationStatus.exhausted] rows are
-  /// never returned — they've used up their retry budget (see
-  /// [RetryPolicy]) and need manual intervention.
   Future<List<SyncOperation>> getPendingOperations({DateTime? now});
 
-  /// Updates an operation after a send attempt.
-  ///
-  /// [nextRetryAt] is set alongside [SyncOperationStatus.failed] to
-  /// schedule the next attempt ([RetryPolicy.nextRetryAt]); leave it
-  /// `null` for [SyncOperationStatus.exhausted] (there is no next
-  /// attempt) or [SyncOperationStatus.synced].
   Future<void> updateOperationStatus(
     String operationId,
     SyncOperationStatus status, {
@@ -68,6 +79,5 @@ abstract class LocalStorage {
     DateTime? nextRetryAt,
   });
 
-  /// Removes an operation once the server has acknowledged it.
   Future<void> removeOperation(String operationId);
 }
