@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkwebsite=self.webpackChunkwebsite||[]).push([["1833"],{5513(e){e.exports=JSON.parse('{"title":"Recent posts","items":[{"title":"Why Offline-First Is Becoming Mandatory for Modern Mobile Applications","permalink":"/blog/why-offline-first-mandatory","unlisted":false,"date":"2026-07-14T00:00:00.000Z"}]}')}}]);
