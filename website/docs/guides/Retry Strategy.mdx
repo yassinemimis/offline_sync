@@ -1,0 +1,80 @@
+---
+id: retry-strategy
+title: Retry Strategy
+sidebar_position: 3
+description: How Offline Sync automatically retries failed operations without duplicating side effects.
+---
+
+# Retry Strategy
+
+The **Retry Strategy** determines what happens when an operation sent by the [Network Layer](/docs/guides/network-layer) fails in a recoverable way (e.g. timeout, connection drop, 5xx server error). Its goal is to eventually deliver every operation without causing duplicates or losing data.
+
+## Default Behavior
+
+By default, Offline Sync uses an **exponential backoff** strategy: each retry waits longer than the previous one, up to a configurable maximum.
+
+```dart
+OfflineSync.configure(
+  retry: RetryConfig(
+    strategy: RetryStrategy.exponentialBackoff,
+    maxAttempts: 5,
+    initialDelay: const Duration(seconds: 2),
+    maxDelay: const Duration(minutes: 5),
+  ),
+);
+```
+
+| Attempt | Delay (approx.) |
+|---------|-----------------|
+| 1       | 2s              |
+| 2       | 4s              |
+| 3       | 8s              |
+| 4       | 16s             |
+| 5       | 32s (capped by `maxDelay`) |
+
+## What Gets Retried
+
+| Failure type                        | Retried? |
+|--------------------------------------|----------|
+| Network timeout                      | ✅        |
+| Connection lost                      | ✅        |
+| Server error (5xx)                   | ✅        |
+| Rate limited (429)                   | ✅ (respects `Retry-After` if present) |
+| Validation error (4xx, non-conflict) | ❌        |
+| Conflict (409 / version mismatch)    | ❌ → handed to Conflict Resolution |
+
+## Giving Up
+
+Once `maxAttempts` is reached, the operation is marked as **failed** rather than being retried indefinitely. Failed operations remain visible in the queue so the app (or the user) can decide to retry manually or discard them.
+
+```dart
+OfflineSync.queue.onOperationFailed.listen((op) {
+  print('Giving up on ${op.id} after ${op.attempts} attempts');
+});
+```
+
+## Custom Strategies
+
+You can implement your own retry policy by conforming to the retry contract:
+
+```dart
+class LinearRetry implements RetryStrategyContract {
+  @override
+  Duration delayFor(int attempt) => Duration(seconds: attempt * 3);
+
+  @override
+  bool shouldRetry(SyncFailure failure) => failure.isRecoverable;
+}
+```
+
+```dart
+OfflineSync.configure(
+  retry: RetryConfig.custom(LinearRetry()),
+);
+```
+
+## Related
+
+- [Network Layer](/docs/guides/network-layer)
+- [Queue Engine](/docs/guides/queue-engine)
+- [Conflict Resolution](/docs/guides/conflict-resolution)

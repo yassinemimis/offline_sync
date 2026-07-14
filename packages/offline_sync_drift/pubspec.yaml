@@ -5,9 +5,10 @@ description: >
   deleted).
 version: 0.0.1
 homepage: https://github.com/<org>/offline_sync
+resolution: workspace
 
 environment:
-  sdk: '>=3.3.0 <4.0.0'
+  sdk: ^3.5.0
   flutter: '>=3.19.0'
 
 dependencies:

@@ -1,0 +1,67 @@
+---
+id: queue-engine
+title: Queue Engine
+sidebar_position: 1
+description: How Offline Sync queues local operations before they are synchronized with the backend.
+---
+
+# Queue Engine
+
+The **Queue Engine** is the component responsible for capturing every write operation performed while offline (or online) and persisting it in an ordered, durable queue until it can be safely synchronized with the remote backend.
+
+## Why a Queue?
+
+In an offline-first app, a user action (create, update, delete) cannot always be sent to the server immediately. The Queue Engine decouples **when an operation happens** from **when it is synchronized**, guaranteeing that:
+
+- No operation is lost, even if the app is killed or the device loses power.
+- Operations are replayed in the correct order.
+- Failed operations can be retried without duplicating side effects.
+
+## How It Works
+
+1. **Capture** — Every call like `OfflineSync.save(user)` creates an operation record instead of hitting the network directly.
+2. **Persist** — The operation is written to local storage (via a [Storage Adapter](/docs/adapters/storage-adapters)) before returning control to the caller.
+3. **Enqueue** — The operation is appended to an ordered queue, tagged with metadata (timestamp, entity type, operation type, retry count).
+4. **Process** — A background worker drains the queue, sending operations through the [Network Layer](/docs/guides/network-layer).
+5. **Acknowledge** — On success, the operation is removed from the queue. On failure, it is handed to the [Retry Strategy](/docs/guides/retry-strategy).
+
+```dart
+// This call is instant and safe, even with no connection.
+await OfflineSync.save(user);
+```
+
+## Operation Types
+
+| Type     | Description                              |
+|----------|-------------------------------------------|
+| `create` | A new entity was added locally            |
+| `update` | An existing entity was modified           |
+| `delete` | An entity was marked for deletion         |
+
+## Ordering Guarantees
+
+Operations belonging to the **same entity** are always processed in the order they were created. Operations on **different entities** may be processed concurrently, depending on the configured concurrency level.
+
+```dart
+OfflineSync.configure(
+  queue: QueueConfig(
+    concurrency: 4,
+    persistImmediately: true,
+  ),
+);
+```
+
+## Inspecting the Queue
+
+During development, you can inspect pending operations using [DevTools](/docs/tooling/devtools):
+
+```dart
+final pending = await OfflineSync.queue.pendingOperations();
+print(pending.length);
+```
+
+## Related
+
+- [Network Layer](/docs/guides/network-layer)
+- [Retry Strategy](/docs/guides/retry-strategy)
+- [Storage Adapters](/docs/adapters/storage-adapters)
