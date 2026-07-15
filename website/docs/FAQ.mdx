@@ -2,4 +2,129 @@
 sidebar_position: 11
 title: FAQ
 slug: /FAQ
+description: Frequently asked questions about Offline Sync Kit.
+
 ---
+
+#  Frequently Asked Questions
+
+Here are the answers to the most common questions about **Offline Sync Kit**. If you have a question that isn't answered here, feel free to open a discussion on our [GitHub Repository](https://github.com/yassinemimis/offline_sync/discussions).
+
+---
+
+<details style={{
+  border: '1px solid var(--ifm-color-emphasis-300)',
+  borderRadius: '8px',
+  padding: '1rem',
+  marginBottom: '1rem',
+  backgroundColor: 'var(--ifm-background-subtle-color)'
+}}>
+  <summary style={{fontWeight: 'bold', cursor: 'pointer', fontSize: '1.1rem'}}>
+     Why should I use Offline Sync Kit instead of writing my own sync logic?
+  </summary>
+  <div style={{marginTop: '0.8rem'}}>
+    <p>
+      Writing a reliable offline-first system is deceptively hard. You have to handle database schema management, queue serialization, network change detection, exponential backoff retries, and conflict resolution. 
+    </p>
+    <p>
+      <strong>Offline Sync Kit</strong> provides a fully tested, modular, and standardized architecture out of the box, saving you months of development time so you can focus on your app's core features.
+    </p>
+  </div>
+</details>
+
+<details style={{
+  border: '1px solid var(--ifm-color-emphasis-300)',
+  borderRadius: '8px',
+  padding: '1rem',
+  marginBottom: '1rem',
+  backgroundColor: 'var(--ifm-background-subtle-color)'
+}}>
+  <summary style={{fontWeight: 'bold', cursor: 'pointer', fontSize: '1.1rem'}}>
+     Is SQLite (Drift) the only supported database?
+  </summary>
+  <div style={{marginTop: '0.8rem'}}>
+    <p>
+      Currently, <strong>Drift/SQLite</strong> is the default built-in local storage adapter (Phase 1). However, the core library is fully database-agnostic. 
+    </p>
+    <p>
+      As planned in our roadmap, we will be releasing official adapters for <strong>Isar</strong> and <strong>Hive</strong> in Phase 11. You can also implement the abstract <code>LocalStorage</code> contract to plug in any database you prefer.
+    </p>
+  </div>
+</details>
+
+<details style={{
+  border: '1px solid var(--ifm-color-emphasis-300)',
+  borderRadius: '8px',
+  padding: '1rem',
+  marginBottom: '1rem',
+  backgroundColor: 'var(--ifm-background-subtle-color)'
+}}>
+  <summary style={{fontWeight: 'bold', cursor: 'pointer', fontSize: '1.1rem'}}>
+     Does this library work with any backend?
+  </summary>
+  <div style={{marginTop: '0.8rem'}}>
+    <p>
+      <strong>Yes!</strong> By utilizing the <code>SyncTransport</code> interface, you can adapt the library to communicate with any HTTP REST API. 
+    </p>
+    <p>
+      The core handles the queue management and decides <em>when</em> and <em>what</em> to send, while you define <em>how</em> it is sent. Future updates will introduce ready-to-use adapters for GraphQL, Firebase, and Supabase.
+    </p>
+  </div>
+</details>
+
+<details style={{
+  border: '1px solid var(--ifm-color-emphasis-300)',
+  borderRadius: '8px',
+  padding: '1rem',
+  marginBottom: '1rem',
+  backgroundColor: 'var(--ifm-background-subtle-color)'
+}}>
+  <summary style={{fontWeight: 'bold', cursor: 'pointer', fontSize: '1.1rem'}}>
+     How are conflicts resolved during synchronization?
+  </summary>
+  <div style={{marginTop: '0.8rem'}}>
+    <p>
+      We support four conflict resolution strategies to handle cases where data was updated on both the client and the server simultaneously:
+    </p>
+    <ul>
+      <li><strong>Server Wins:</strong> The local database is overwritten with the server's version.</li>
+      <li><strong>Client Wins:</strong> The server is forced to accept the client's current state.</li>
+      <li><strong>Last Update Wins:</strong> Compares the timestamps (<code>updatedAt</code>) and keeps the newest one.</li>
+      <li><strong>Manual (Callback):</strong> Lets you supply a custom callback function to resolve the conflict programmatically or prompt the user.</li>
+    </ul>
+  </div>
+</details>
+
+<details style={{
+  border: '1px solid var(--ifm-color-emphasis-300)',
+  borderRadius: '8px',
+  padding: '1rem',
+  marginBottom: '1rem',
+  backgroundColor: 'var(--ifm-background-subtle-color)'
+}}>
+  <summary style={{fontWeight: 'bold', cursor: 'pointer', fontSize: '1.1rem'}}>
+     Does it support background synchronization?
+  </summary>
+  <div style={{marginTop: '0.8rem'}}>
+    <p>
+      Background synchronization using Android's <code>WorkManager</code> and iOS background tasks is on our active roadmap (Phase 6). This will allow your app to sync queued actions even when the application is fully closed or in the background.
+    </p>
+  </div>
+</details>
+
+<details style={{
+  border: '1px solid var(--ifm-color-emphasis-300)',
+  borderRadius: '8px',
+  padding: '1rem',
+  marginBottom: '1rem',
+  backgroundColor: 'var(--ifm-background-subtle-color)'
+}}>
+  <summary style={{fontWeight: 'bold', cursor: 'pointer', fontSize: '1.1rem'}}>
+     Can I encrypt the local database?
+  </summary>
+  <div style={{marginTop: '0.8rem'}}>
+    <p>
+      Yes. Since we currently use SQLite/Drift, you can easily integrate encryption using <code>sqlcipher</code>. Built-in, out-of-the-box encrypted database adapters are planned as part of Phase 9.
+    </p>
+  </div>
+</details>
