@@ -24,23 +24,26 @@ class DriftLocalStorage implements LocalStorage {
     required Map<String, dynamic> data,
     required DateTime updatedAt,
   }) async {
-    final existing = await (_db.select(_db.entitiesTable)
-          ..where((t) =>
-              t.entityType.equals(entityName) & t.entityId.equals(entityId)))
-        .getSingleOrNull();
-    final baselineVersion = existing?.version ?? 0;
+    return _db.transaction(() async {
+      final existing = await (_db.select(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .getSingleOrNull();
+      final baselineVersion = existing?.version ?? 0;
 
-    await _db.into(_db.entitiesTable).insertOnConflictUpdate(
-          EntitiesTableCompanion.insert(
-            entityType: entityName,
-            entityId: entityId,
-            dataJson: jsonEncode(data),
-            updatedAt: updatedAt,
-            isSynced: const Value(false),
-            version: Value(baselineVersion),
-          ),
-        );
-    return baselineVersion;
+      await _db.into(_db.entitiesTable).insertOnConflictUpdate(
+            EntitiesTableCompanion.insert(
+              entityType: entityName,
+              entityId: entityId,
+              dataJson: jsonEncode(data),
+              updatedAt: updatedAt,
+              isSynced: const Value(false),
+              version: Value(baselineVersion),
+            ),
+          );
+      return baselineVersion;
+    });
   }
 
   @override
@@ -48,20 +51,24 @@ class DriftLocalStorage implements LocalStorage {
     required String entityName,
     required String entityId,
   }) async {
-    final existing = await (_db.select(_db.entitiesTable)
-          ..where((t) =>
-              t.entityType.equals(entityName) & t.entityId.equals(entityId)))
-        .getSingleOrNull();
-    final baselineVersion = existing?.version ?? 0;
+    return _db.transaction(() async {
+      final existing = await (_db.select(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .getSingleOrNull();
+      final baselineVersion = existing?.version ?? 0;
 
-    await (_db.update(_db.entitiesTable)
-          ..where((t) =>
-              t.entityType.equals(entityName) & t.entityId.equals(entityId)))
-        .write(const EntitiesTableCompanion(
-      deleted: Value(true),
-      isSynced: Value(false),
-    ));
-    return baselineVersion;
+      await (_db.update(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .write(const EntitiesTableCompanion(
+        deleted: Value(true),
+        isSynced: Value(false),
+      ));
+      return baselineVersion;
+    });
   }
 
   @override
@@ -76,23 +83,34 @@ class DriftLocalStorage implements LocalStorage {
   }
 
   @override
-  Future<void> markSynced({
+  Future<int> markSynced({
     required String entityName,
     required String entityId,
+    int? serverVersion,
   }) async {
-    final existing = await (_db.select(_db.entitiesTable)
-          ..where((t) =>
-              t.entityType.equals(entityName) & t.entityId.equals(entityId)))
-        .getSingleOrNull();
-    if (existing == null) return;
+    return _db.transaction(() async {
+      final existing = await (_db.select(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .getSingleOrNull();
+      if (existing == null) return 0;
 
-    await (_db.update(_db.entitiesTable)
-          ..where((t) =>
-              t.entityType.equals(entityName) & t.entityId.equals(entityId)))
-        .write(EntitiesTableCompanion(
-      version: Value(existing.version + 1),
-      isSynced: const Value(true),
-    ));
+      // Prefer the version the server actually reports; fall back to
+      // "server incremented by exactly one" only when the transport
+      // didn't capture one (see SyncTransportResult.success docs).
+      final newVersion = serverVersion ?? existing.version + 1;
+
+      await (_db.update(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .write(EntitiesTableCompanion(
+        version: Value(newVersion),
+        isSynced: const Value(true),
+      ));
+      return newVersion;
+    });
   }
 
   @override

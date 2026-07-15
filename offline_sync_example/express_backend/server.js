@@ -2,16 +2,16 @@ const express = require('express');
 const app = express();
 app.use(express.json());
 
-// Logger middleware — يطبع كل request (خليه زي ما هو عندك إذا موجود مسبقًا)
+// Logger middleware 
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()}  ${req.method} ${req.path}`, req.body);
   next();
 });
 
-let todos = []; // كل عنصر فيه _version يبدأ من 1
+let todos = []; 
 
 app.get('/todos', (req, res) => {
-  // ما نرجع _version للقراءة العادية — التطبيق ما يحتاجه إلا وقت التعارض
+  
   res.json(todos.map(({ _version, ...rest }) => rest));
 });
 

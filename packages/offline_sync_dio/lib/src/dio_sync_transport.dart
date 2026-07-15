@@ -9,7 +9,16 @@ import 'package:offline_sync_core/offline_sync_core.dart';
 /// |----------|--------|-------------------------------|--------------------|
 /// | create   | POST   | `adapter.endpoint`             | `operation.payload` |
 /// | update   | PUT    | `adapter.endpoint/entityId`    | `operation.payload` |
-/// | delete   | DELETE | `adapter.endpoint/entityId`    | — |
+/// | delete   | DELETE | `adapter.endpoint/entityId`    | `_version` (query)  |
+///
+/// Every `update`/`delete` sends `_version` (from
+/// [SyncOperation.localVersion]) as an optimistic-concurrency token. The
+/// server is expected to respond `409` — with its current copy of the
+/// entity as the body, `_version` included — if that token is stale;
+/// that's mapped to [SyncTransportResult.conflict] below. This is a
+/// convention this package assumes; adjust to match your actual backend
+/// if it differs (that's exactly why [SyncTransport] is an interface and
+/// not hardcoded into `core` — see ARCHITECTURE.md, decision #6).
 ///
 /// Pass in your own [Dio] instance so this package never has an opinion
 /// on `baseUrl`, auth headers, interceptors, or timeouts — configure
@@ -41,29 +50,45 @@ class DioSyncTransport implements SyncTransport {
         case SyncOperationType.create:
           // No version to check yet — this is a brand new row.
           await _dio.post(adapter.endpoint, data: operation.payload);
+          return const SyncTransportResult.success();
+
         case SyncOperationType.update:
-          await _dio.put(
+          final response = await _dio.put(
             '${adapter.endpoint}/${operation.entityId}',
             data: {...operation.payload, '_version': operation.localVersion},
           );
+          return SyncTransportResult.success(
+            serverVersion: (response.data is Map)
+                ? (response.data['_version'] as num?)?.toInt()
+                : null,
+          );
+
         case SyncOperationType.delete:
+          // Body on DELETE is dropped by some proxies/servers — the
+          // version token goes in the query string instead, so it
+          // reliably reaches the server either way.
           await _dio.delete(
             '${adapter.endpoint}/${operation.entityId}',
-            data: {'_version': operation.localVersion},
+            queryParameters: {'_version': operation.localVersion},
           );
+          return const SyncTransportResult.success();
       }
-      return const SyncTransportResult.success();
     } on DioException catch (e) {
       final status = e.response?.statusCode;
 
       if (status == 409) {
-        // Server's convention: 409 body = its current copy of the
-        // entity, with `_version` mixed in — strip it back out before
-        // handing the data to the adapter/conflict resolver.
         final raw = e.response?.data;
-        final body = raw is Map
-            ? Map<String, dynamic>.from(raw)
-            : <String, dynamic>{};
+        if (raw is! Map || !raw.containsKey('_version')) {
+          // Unexpected 409 shape (e.g. a proxy/gateway error, not our
+          // API) — treat as a plain failure rather than inventing a
+          // conflict with no real server data behind it.
+          return SyncTransportResult.failure(
+            retriable: false,
+            message: 'Received 409 with an unexpected body shape',
+          );
+        }
+
+        final body = Map<String, dynamic>.from(raw);
         final serverVersion = (body.remove('_version') as num?)?.toInt() ?? 0;
         return SyncTransportResult.conflict(
           serverData: body,

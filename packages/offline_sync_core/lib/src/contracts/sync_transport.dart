@@ -5,13 +5,18 @@ import 'sync_operation.dart';
 class SyncTransportResult {
   /// The operation was acknowledged by the server. Safe to remove from
   /// the queue.
-  const SyncTransportResult.success()
-      : isSuccess = true,
-        isConflict = false,
-        retriable = false,
-        message = null,
-        serverData = null,
-        serverVersion = null;
+/// The operation was acknowledged by the server. Safe to remove from
+/// the queue.
+///
+/// [serverVersion] is the entity's new version *as the server sees it*
+/// after this write, if the transport implementation captured it from
+/// the response. When `null`, `LocalStorage.markSynced` falls back to
+/// assuming the server incremented by exactly one.
+const SyncTransportResult.success({this.serverVersion, this.serverData})
+    : isSuccess = true,
+      isConflict = false,
+      retriable = false,
+      message = null;
 
   /// The operation was not acknowledged.
   ///

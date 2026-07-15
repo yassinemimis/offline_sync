@@ -37,13 +37,15 @@ abstract class LocalStorage {
     required String entityId,
   });
 
-  /// Called after a create/update operation is confirmed synced. Bumps
-  /// `version` by exactly one (mirroring the server's own
-  /// increment-per-write convention) and marks the row `isSynced`.
-  Future<void> markSynced({
-    required String entityName,
-    required String entityId,
-  });
+/// Called after a create/update operation is confirmed synced. Uses
+/// [serverVersion] as the new baseline if the transport captured one
+/// from the response; otherwise falls back to incrementing by one.
+/// Returns the entity's new version.
+Future<int> markSynced({
+  required String entityName,
+  required String entityId,
+  int? serverVersion,
+});
 
   /// Writes back the result of conflict resolution: [data] becomes the
   /// row's content, [version] becomes its new baseline (the server's

@@ -154,17 +154,22 @@ class OfflineSync {
   final now = DateTime.now();
   final pending = await storage.getPendingOperations(now: now);
 
-  for (final op in pending) {
-    final adapter = _adaptersByName[op.entityName];
-    if (adapter == null) continue;
+for (final op in pending) {
+  final adapter = _adaptersByName[op.entityName];
+  if (adapter == null) continue;
 
+  try {
     final result = await transport.send(op, adapter);
 
     if (result.isSuccess) {
       if (op.type == SyncOperationType.delete) {
         await storage.hardDeleteEntity(entityName: op.entityName, entityId: op.entityId);
       } else {
-        await storage.markSynced(entityName: op.entityName, entityId: op.entityId);
+        await storage.markSynced(
+  entityName: op.entityName,
+  entityId: op.entityId,
+  serverVersion: result.serverVersion,
+);
       }
       await storage.removeOperation(op.id);
       continue;
@@ -175,7 +180,6 @@ class OfflineSync {
       continue;
     }
 
-    // فشل عادي — نفس منطق retry/backoff اللي عندك أصلاً (RetryPolicy)
     final newRetryCount = op.retryCount + 1;
     final canRetry = result.retriable && _retryPolicy.hasAttemptsLeft(newRetryCount);
     if (canRetry) {
@@ -188,8 +192,15 @@ class OfflineSync {
     } else {
       await storage.updateOperationStatus(op.id, SyncOperationStatus.exhausted, retryCount: newRetryCount);
     }
+  } catch (e) {
+
+    await storage.updateOperationStatus(
+      op.id,
+      SyncOperationStatus.exhausted,
+      retryCount: op.retryCount + 1,
+    );
   }
-}
+}}
 
 static Future<void> _resolveConflict(
   SyncOperation op,
@@ -197,6 +208,36 @@ static Future<void> _resolveConflict(
   SyncTransportResult result,
   LocalStorage storage,
 ) async {
+  if (op.type == SyncOperationType.delete) {
+  
+    final serverEntity = adapter.fromJson(result.serverData!);
+    switch (_conflictResolver.type) {
+      case ConflictStrategyType.clientWins:
+     
+        await storage.enqueueOperation(SyncOperation(
+          id: _uuid.v4(),
+          entityName: op.entityName,
+          entityId: op.entityId,
+          type: SyncOperationType.delete,
+          payload: const {},
+          createdAt: DateTime.now(),
+          localVersion: result.serverVersion!,
+        ));
+      default:
+    
+        
+        await storage.reconcileEntity(
+          entityName: op.entityName,
+          entityId: op.entityId,
+          data: result.serverData!,
+          version: result.serverVersion!,
+          updatedAt: adapter.getUpdatedAt(serverEntity),
+          isSynced: true,
+        );
+    }
+    await storage.removeOperation(op.id);
+    return;
+  }
   final localEntity = adapter.fromJson(op.payload);
   final serverEntity = adapter.fromJson(result.serverData!);
 
