@@ -31,7 +31,7 @@ url: 'https://yassinemimis.github.io',
   // may want to replace "en" with "zh-Hans".
   i18n: {
     defaultLocale: 'en',
-    locales: ['en'],
+    locales: ['en', 'fr'],
   },
 
   presets: [
@@ -42,8 +42,7 @@ url: 'https://yassinemimis.github.io',
           sidebarPath: './sidebars.ts',
           // Please change this to your repo.
           // Remove this to remove the "edit this page" links.
-          editUrl:
-            'https://github.com/yassinemimis/offline_sync',
+          
         },
         blog: {
           showReadingTime: true,

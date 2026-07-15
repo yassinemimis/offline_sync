@@ -5,6 +5,7 @@ import '../contracts/sync_adapter.dart';
 import '../contracts/sync_operation.dart';
 import '../contracts/sync_transport.dart';
 import '../retry/retry_policy.dart';
+import '../conflict/conflict_resolver.dart';
 
 /// Public entry point of the library.
 ///
@@ -39,24 +40,27 @@ class OfflineSync {
   /// only has that string (from the queue row) to work with — it has no
   /// Dart [Type] to look the adapter up by at that point.
   static final Map<String, SyncAdapter> _adaptersByName = {};
-
+  static ConflictResolver _conflictResolver = const ConflictResolver.lastWriteWins();
   /// Opens local storage and runs migrations, and wires up the transport
   /// used by [sync]. Both are injected so `core` never depends on a
   /// concrete database or HTTP package directly. [retryPolicy] controls
   /// backoff timing and the retry budget; the default is reasonable for
   /// most apps — see [RetryPolicy] to tune it.
-  static Future<void> initialize({
-    required LocalStorage storage,
-    required SyncTransport transport,
-    RetryPolicy retryPolicy = const RetryPolicy(),
-  }) async {
-    _storage = storage;
-    _transport = transport;
-    _retryPolicy = retryPolicy;
-    await storage.init();
-    _initialized = true;
-  }
-
+ static Future<void> initialize({
+  required LocalStorage storage,
+  SyncTransport? transport,
+  RetryPolicy retryPolicy = const RetryPolicy(),
+  ConflictResolver conflictResolver = const ConflictResolver.lastWriteWins(),
+  void Function(SyncConflict conflict, Map<String, dynamic> winningData)? onConflict,
+}) async {
+  _storage = storage;
+  _transport = transport;
+  _retryPolicy = retryPolicy;
+  _conflictResolver = conflictResolver;
+  _onConflict = onConflict;
+  await storage.init();
+  _initialized = true;
+}
   /// Registers a [SyncAdapter] for type [T]. Must be called once per model
   /// before saving/reading instances of that type.
   static void register<T>(SyncAdapter<T> adapter) {
@@ -68,56 +72,51 @@ class OfflineSync {
   /// create/update operation. Returns as soon as the *local* write
   /// succeeds — network sync happens separately, via [sync].
   static Future<void> save<T>(T entity) async {
-    final adapter = _requireAdapter<T>();
-    final storage = _requireStorage();
+  final adapter = _requireAdapter<T>();
+  final storage = _requireStorage();
 
-    final id = adapter.getId(entity);
-    final updatedAt = adapter.getUpdatedAt(entity);
-    final json = adapter.toJson(entity);
+  final id = adapter.getId(entity);
+  final updatedAt = adapter.getUpdatedAt(entity);
+  final json = adapter.toJson(entity);
 
-    // Read first so we know whether this is a create or an update — the
-    // server needs to know which HTTP verb to use.
-    final existing = await storage.getEntity(
-      entityName: adapter.entityName,
-      entityId: id,
-    );
+  final existing = await storage.getEntity(entityName: adapter.entityName, entityId: id);
 
-    await storage.saveEntity(
-      entityName: adapter.entityName,
-      entityId: id,
-      data: json,
-      updatedAt: updatedAt,
-    );
+  final baselineVersion = await storage.saveEntity(
+    entityName: adapter.entityName,
+    entityId: id,
+    data: json,
+    updatedAt: updatedAt,
+  );
 
-    await storage.enqueueOperation(SyncOperation(
-      id: _uuid.v4(),
-      entityName: adapter.entityName,
-      entityId: id,
-      type: existing == null
-          ? SyncOperationType.create
-          : SyncOperationType.update,
-      payload: json,
-      createdAt: DateTime.now(),
-    ));
-  }
+  await storage.enqueueOperation(SyncOperation(
+    id: _uuid.v4(),
+    entityName: adapter.entityName,
+    entityId: id,
+    type: existing == null ? SyncOperationType.create : SyncOperationType.update,
+    payload: json,
+    createdAt: DateTime.now(),
+    localVersion: baselineVersion,
+  ));
+}
 
   /// Soft-deletes the entity with [id] locally and enqueues a delete
   /// operation.
-  static Future<void> delete<T>(String id) async {
-    final adapter = _requireAdapter<T>();
-    final storage = _requireStorage();
+ static Future<void> delete<T>(String id) async {
+  final adapter = _requireAdapter<T>();
+  final storage = _requireStorage();
 
-    await storage.softDeleteEntity(entityName: adapter.entityName, entityId: id);
+  final baselineVersion = await storage.softDeleteEntity(entityName: adapter.entityName, entityId: id);
 
-    await storage.enqueueOperation(SyncOperation(
-      id: _uuid.v4(),
-      entityName: adapter.entityName,
-      entityId: id,
-      type: SyncOperationType.delete,
-      payload: const {},
-      createdAt: DateTime.now(),
-    ));
-  }
+  await storage.enqueueOperation(SyncOperation(
+    id: _uuid.v4(),
+    entityName: adapter.entityName,
+    entityId: id,
+    type: SyncOperationType.delete,
+    payload: const {},
+    createdAt: DateTime.now(),
+    localVersion: baselineVersion,
+  ));
+}
 
   /// Reads all locally stored, non-deleted instances of [T].
   static Future<List<T>> getAll<T>() async {
@@ -150,52 +149,137 @@ class OfflineSync {
   /// picked up again on the next [sync] call once the adapter is
   /// registered.
   static Future<void> sync() async {
-    final storage = _requireStorage();
-    final transport = _requireTransport();
-    final now = DateTime.now();
-    final pending = await storage.getPendingOperations(now: now);
+  final storage = _requireStorage();
+  final transport = _requireTransport();
+  final now = DateTime.now();
+  final pending = await storage.getPendingOperations(now: now);
 
-    for (final op in pending) {
-      final adapter = _adaptersByName[op.entityName];
-      if (adapter == null) {
-        assert(
-          false,
-          'No SyncAdapter registered for entityName "${op.entityName}" '
-          '— skipping queued operation ${op.id} for now.',
-        );
-        continue;
-      }
+for (final op in pending) {
+  final adapter = _adaptersByName[op.entityName];
+  if (adapter == null) continue;
 
-      final result = await transport.send(op, adapter);
+  try {
+    final result = await transport.send(op, adapter);
 
-      if (result.isSuccess) {
-        await storage.removeOperation(op.id);
-        continue;
-      }
-
-      final newRetryCount = op.retryCount + 1;
-      final canRetry =
-          result.retriable && _retryPolicy.hasAttemptsLeft(newRetryCount);
-
-      if (canRetry) {
-        await storage.updateOperationStatus(
-          op.id,
-          SyncOperationStatus.failed,
-          retryCount: newRetryCount,
-          nextRetryAt: _retryPolicy.nextRetryAt(newRetryCount, now: now),
-        );
+    if (result.isSuccess) {
+      if (op.type == SyncOperationType.delete) {
+        await storage.hardDeleteEntity(entityName: op.entityName, entityId: op.entityId);
       } else {
-        // Either the failure was non-retriable (retrying the identical
-        // request won't help), or the retry budget is used up — either
-        // way, stop retrying automatically.
-        await storage.updateOperationStatus(
-          op.id,
-          SyncOperationStatus.exhausted,
-          retryCount: newRetryCount,
-        );
+        await storage.markSynced(
+  entityName: op.entityName,
+  entityId: op.entityId,
+  serverVersion: result.serverVersion,
+);
       }
+      await storage.removeOperation(op.id);
+      continue;
     }
+
+    if (result.isConflict) {
+      await _resolveConflict(op, adapter, result, storage);
+      continue;
+    }
+
+    final newRetryCount = op.retryCount + 1;
+    final canRetry = result.retriable && _retryPolicy.hasAttemptsLeft(newRetryCount);
+    if (canRetry) {
+      await storage.updateOperationStatus(
+        op.id,
+        SyncOperationStatus.failed,
+        retryCount: newRetryCount,
+        nextRetryAt: _retryPolicy.nextRetryAt(newRetryCount, now: now),
+      );
+    } else {
+      await storage.updateOperationStatus(op.id, SyncOperationStatus.exhausted, retryCount: newRetryCount);
+    }
+  } catch (e) {
+
+    await storage.updateOperationStatus(
+      op.id,
+      SyncOperationStatus.exhausted,
+      retryCount: op.retryCount + 1,
+    );
   }
+}}
+
+static Future<void> _resolveConflict(
+  SyncOperation op,
+  SyncAdapter adapter,
+  SyncTransportResult result,
+  LocalStorage storage,
+) async {
+  if (op.type == SyncOperationType.delete) {
+  
+    final serverEntity = adapter.fromJson(result.serverData!);
+    switch (_conflictResolver.type) {
+      case ConflictStrategyType.clientWins:
+     
+        await storage.enqueueOperation(SyncOperation(
+          id: _uuid.v4(),
+          entityName: op.entityName,
+          entityId: op.entityId,
+          type: SyncOperationType.delete,
+          payload: const {},
+          createdAt: DateTime.now(),
+          localVersion: result.serverVersion!,
+        ));
+      default:
+    
+        
+        await storage.reconcileEntity(
+          entityName: op.entityName,
+          entityId: op.entityId,
+          data: result.serverData!,
+          version: result.serverVersion!,
+          updatedAt: adapter.getUpdatedAt(serverEntity),
+          isSynced: true,
+        );
+    }
+    await storage.removeOperation(op.id);
+    return;
+  }
+  final localEntity = adapter.fromJson(op.payload);
+  final serverEntity = adapter.fromJson(result.serverData!);
+
+  final conflict = SyncConflict(
+    entityName: op.entityName,
+    entityId: op.entityId,
+    localData: op.payload,
+    localVersion: op.localVersion,
+    localUpdatedAt: adapter.getUpdatedAt(localEntity),
+    serverData: result.serverData!,
+    serverVersion: result.serverVersion!,
+    serverUpdatedAt: adapter.getUpdatedAt(serverEntity),
+  );
+
+  final winningData = await _conflictResolver.resolve(conflict);
+  final winnerIsServer = identical(winningData, conflict.serverData);
+
+  await storage.reconcileEntity(
+    entityName: op.entityName,
+    entityId: op.entityId,
+    data: winningData,
+    version: conflict.serverVersion,
+    updatedAt: winnerIsServer ? conflict.serverUpdatedAt : DateTime.now(),
+    isSynced: winnerIsServer,
+  );
+  await storage.removeOperation(op.id);
+
+  if (!winnerIsServer) {
+    // المحتوى الرابح لسا ما وصل السيرفر — نعيد جدولته بـ baseline محدّث
+    // (نسخة السيرفر الحالية)، عشان محاولة الإرسال الجاية تنجح.
+    await storage.enqueueOperation(SyncOperation(
+      id: _uuid.v4(),
+      entityName: op.entityName,
+      entityId: op.entityId,
+      type: SyncOperationType.update,
+      payload: winningData,
+      createdAt: DateTime.now(),
+      localVersion: conflict.serverVersion,
+    ));
+  }
+  _onConflict?.call(conflict, winningData);
+}
 
   static SyncAdapter<T> _requireAdapter<T>() {
     final adapter = _adapters[T];
@@ -225,4 +309,9 @@ class OfflineSync {
     }
     return _transport!;
   }
+  static void Function(SyncConflict conflict, Map<String, dynamic> winningData)? _onConflict;
+  static Future<int> pendingOperationsCount() async {
+  final storage = _requireStorage();
+  return (await storage.getPendingOperations()).length;
+}
 }

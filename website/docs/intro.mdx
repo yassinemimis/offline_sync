@@ -73,43 +73,7 @@ Offline Sync is built around a few simple principles:
 
 ## Architecture Overview
 
-```text
-Flutter Application
-        │
-        ▼
- Offline Sync Kit
-        │
- ┌──────┴──────┐
- │             │
- ▼             ▼
-Local DB    HTTP Transport
- │             │
- └──────┬──────┘
-        ▼
- Synchronization Queue
-        │
-        ▼
- Retry & Conflict Resolution
-```
-
----
-
-## Current Roadmap
-
-### ✅ Completed
-
-- Phase 0 — Core Contracts
-- Phase 1 — Local Storage
-- Phase 2 — Network Synchronization
-- Phase 3 — Retry & Backoff
-
-### 🚧 Coming Next
-
-- Phase 4 — Conflict Resolution
-- Background Synchronization
-- Sync Events
-- Additional Storage Providers
-- Additional Network Transports
+![Docusaurus logo](./img/Architecture_Overview.png)
 
 ---
 

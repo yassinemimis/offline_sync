@@ -5,11 +5,6 @@ import 'package:offline_sync_core/offline_sync_core.dart';
 
 import 'app_database.dart';
 
-/// Drift-backed implementation of [LocalStorage].
-///
-/// This is the piece that turns `OfflineSync.save/sync` from an API
-/// surface (Phase 0) into something that actually persists data
-/// (Phase 1).
 class DriftLocalStorage implements LocalStorage {
   DriftLocalStorage([AppDatabase? database]) : _db = database ?? AppDatabase();
 
@@ -17,40 +12,63 @@ class DriftLocalStorage implements LocalStorage {
 
   @override
   Future<void> init() async {
-    // Opening the connection is lazy (see AppDatabase._openConnection) —
-    // this first query is what actually triggers it and runs migrations.
     await _db.customSelect('SELECT 1').get();
   }
 
   // ---- Entities ----
 
   @override
-  Future<void> saveEntity({
+  Future<int> saveEntity({
     required String entityName,
     required String entityId,
     required Map<String, dynamic> data,
     required DateTime updatedAt,
   }) async {
-    await _db.into(_db.entitiesTable).insertOnConflictUpdate(
-          EntitiesTableCompanion.insert(
-            entityType: entityName,
-            entityId: entityId,
-            dataJson: jsonEncode(data),
-            updatedAt: updatedAt,
-            isSynced: const Value(false),
-          ),
-        );
+    return _db.transaction(() async {
+      final existing = await (_db.select(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .getSingleOrNull();
+      final baselineVersion = existing?.version ?? 0;
+
+      await _db.into(_db.entitiesTable).insertOnConflictUpdate(
+            EntitiesTableCompanion.insert(
+              entityType: entityName,
+              entityId: entityId,
+              dataJson: jsonEncode(data),
+              updatedAt: updatedAt,
+              isSynced: const Value(false),
+              version: Value(baselineVersion),
+            ),
+          );
+      return baselineVersion;
+    });
   }
 
   @override
-  Future<void> softDeleteEntity({
+  Future<int> softDeleteEntity({
     required String entityName,
     required String entityId,
   }) async {
-    await (_db.update(_db.entitiesTable)
-          ..where((t) =>
-              t.entityType.equals(entityName) & t.entityId.equals(entityId)))
-        .write(const EntitiesTableCompanion(deleted: Value(true)));
+    return _db.transaction(() async {
+      final existing = await (_db.select(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .getSingleOrNull();
+      final baselineVersion = existing?.version ?? 0;
+
+      await (_db.update(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .write(const EntitiesTableCompanion(
+        deleted: Value(true),
+        isSynced: Value(false),
+      ));
+      return baselineVersion;
+    });
   }
 
   @override
@@ -62,6 +80,59 @@ class DriftLocalStorage implements LocalStorage {
           ..where((t) =>
               t.entityType.equals(entityName) & t.entityId.equals(entityId)))
         .go();
+  }
+
+  @override
+  Future<int> markSynced({
+    required String entityName,
+    required String entityId,
+    int? serverVersion,
+  }) async {
+    return _db.transaction(() async {
+      final existing = await (_db.select(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .getSingleOrNull();
+      if (existing == null) return 0;
+
+      // Prefer the version the server actually reports; fall back to
+      // "server incremented by exactly one" only when the transport
+      // didn't capture one (see SyncTransportResult.success docs).
+      final newVersion = serverVersion ?? existing.version + 1;
+
+      await (_db.update(_db.entitiesTable)
+            ..where((t) =>
+                t.entityType.equals(entityName) &
+                t.entityId.equals(entityId)))
+          .write(EntitiesTableCompanion(
+        version: Value(newVersion),
+        isSynced: const Value(true),
+      ));
+      return newVersion;
+    });
+  }
+
+  @override
+  Future<void> reconcileEntity({
+    required String entityName,
+    required String entityId,
+    required Map<String, dynamic> data,
+    required int version,
+    required DateTime updatedAt,
+    required bool isSynced,
+  }) async {
+    await _db.into(_db.entitiesTable).insertOnConflictUpdate(
+          EntitiesTableCompanion.insert(
+            entityType: entityName,
+            entityId: entityId,
+            dataJson: jsonEncode(data),
+            updatedAt: updatedAt,
+            version: Value(version),
+            isSynced: Value(isSynced),
+            deleted: const Value(false),
+          ),
+        );
   }
 
   @override
@@ -102,6 +173,7 @@ class DriftLocalStorage implements LocalStorage {
             createdAt: operation.createdAt,
             status: Value(operation.status),
             retryCount: Value(operation.retryCount),
+            localVersion: Value(operation.localVersion),
           ),
         );
   }
@@ -110,15 +182,12 @@ class DriftLocalStorage implements LocalStorage {
   Future<List<SyncOperation>> getPendingOperations({DateTime? now}) async {
     final cutoff = now ?? DateTime.now();
 
-    // pending: never attempted, always eligible.
-    // failed: eligible only once nextRetryAt has passed (or was never
-    // set, defensively).
-    // exhausted rows are excluded on purpose — see LocalStorage docs.
     final rows = await (_db.select(_db.syncOperationsTable)
           ..where((t) =>
               t.status.equalsValue(SyncOperationStatus.pending) |
               (t.status.equalsValue(SyncOperationStatus.failed) &
-                  (t.nextRetryAt.isNull() | t.nextRetryAt.isSmallerOrEqualValue(cutoff))))
+                  (t.nextRetryAt.isNull() |
+                      t.nextRetryAt.isSmallerOrEqualValue(cutoff))))
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
         .get();
 
@@ -133,6 +202,7 @@ class DriftLocalStorage implements LocalStorage {
               status: row.status,
               retryCount: row.retryCount,
               nextRetryAt: row.nextRetryAt,
+              localVersion: row.localVersion,
             ))
         .toList();
   }
@@ -148,10 +218,8 @@ class DriftLocalStorage implements LocalStorage {
           ..where((t) => t.id.equals(operationId)))
         .write(SyncOperationsTableCompanion(
       status: Value(status),
-      retryCount: retryCount == null ? const Value.absent() : Value(retryCount),
-      // Explicit Value(...) (not Value.absent()) even when nextRetryAt is
-      // null: a transition to `exhausted`/`synced` must clear any
-      // previously scheduled retry time, not leave a stale one behind.
+      retryCount:
+          retryCount == null ? const Value.absent() : Value(retryCount),
       nextRetryAt: Value(nextRetryAt),
     ));
   }

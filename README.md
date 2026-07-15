@@ -57,7 +57,7 @@ why they were made.
 - [x] **Phase 3 — Retry & backoff.** Exponential backoff (`RetryPolicy`)
       on retriable failures; a `maxAttempts` budget after which an
       operation is marked `exhausted` instead of retried forever.
-- [ ] **Phase 4 — Conflict resolution.** Server Wins / Client Wins /
+- [x] **Phase 4 — Conflict resolution.** Server Wins / Client Wins /
       Last-Write-Wins / Manual, based on the `version` field already in
       `EntitiesTable`.
 - [ ] **Phase 5 — Connectivity detection.** Auto-trigger `sync()` when the

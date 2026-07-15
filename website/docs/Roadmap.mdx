@@ -2,4 +2,191 @@
 sidebar_position: 10
 title: Roadmap
 slug: /Roadmap
+description: Development roadmap for Offline Sync, phase by phase, with the current status of each phase.
 ---
+
+#  Roadmap
+
+An overview of the library's development phases and the current status of each one. We are building a robust, modular, and enterprise-grade offline-first kit for Flutter.
+
+---
+
+##  Phase-by-Phase Progress
+
+<div style={{
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+  gap: '1rem',
+  margin: '2rem 0'
+}}>
+
+  {/* Completed Phases */}
+  <div style={{
+    border: '1px solid var(--ifm-color-success-dark)',
+    borderRadius: '8px',
+    padding: '1rem',
+    backgroundColor: 'var(--ifm-color-success-contrast-background)',
+    opacity: 0.9
+  }}>
+    <h4 style={{margin: 0, color: 'var(--ifm-color-success-darker)'}}>✅ Done (Phases 0 - 4)</h4>
+    <p style={{fontSize: '0.85rem', margin: '0.5rem 0 0 0'}}>
+      Architecture Core, SQLite Database, Network (Dio), Exponential Retry, and Conflict Resolution are fully operational.
+    </p>
+  </div>
+
+  {/* Active / Next Up */}
+  <div style={{
+    border: '2px solid var(--ifm-color-warning)',
+    borderRadius: '8px',
+    padding: '1rem',
+    backgroundColor: 'var(--ifm-color-warning-contrast-background)',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+  }}>
+    <h4 style={{margin: 0, color: 'var(--ifm-color-warning-darker)'}}>⚡ Active Focus</h4>
+    <p style={{fontSize: '0.85rem', margin: '0.5rem 0 0 0'}}>
+      <strong>Phase 5: Connectivity Detection</strong>. Integrating <code>connectivity_plus</code> to trigger automatic syncs.
+    </p>
+  </div>
+
+  {/* Planned Phases */}
+  <div style={{
+    border: '1px solid var(--ifm-color-emphasis-300)',
+    borderRadius: '8px',
+    padding: '1rem',
+    backgroundColor: 'var(--ifm-background-subtle-color)'
+  }}>
+    <h4 style={{margin: 0, color: 'var(--ifm-color-emphasis-700)'}}>⏳ Future Backlog</h4>
+    <p style={{fontSize: '0.85rem', margin: '0.5rem 0 0 0'}}>
+      Phases 6 to 15 (Background Sync, Delta Sync, Isar/Hive Adapters, and DevTools/CLI tooling).
+    </p>
+  </div>
+
+</div>
+
+---
+
+##  Quick Status Overview
+
+| Phase | Module / Feature | Status |
+| :--- | :--- | :---: |
+| **Phase 0** | Architecture — Core Contracts | ✅ Completed |
+| **Phase 1** | Database + Queue (Drift/SQLite) | ✅ Completed |
+| **Phase 2** | Network Layer (HTTP/Dio) | ✅ Completed |
+| **Phase 3** | Retry + Backoff | ✅ Completed |
+| **Phase 4** | Conflict Resolution | ✅ Completed |
+| **Phase 5** | Connectivity Detection | ⏳ Coming Soon |
+| **Phase 6** | Background Sync (WorkManager) | ⏳ Planned |
+| **Phase 7** | Delta Sync | ⏳ Planned |
+| **Phase 8** | Compression (GZIP) | ⏳ Planned |
+| **Phase 9** | Encryption | ⏳ Planned |
+| **Phase 10** | Logging & Observability | ⏳ Planned |
+| **Phase 11** | Alternative Storage Adapters (Isar/Hive) | ⏳ Planned |
+| **Phase 12** | Alternative Network Adapters (GraphQL/Firebase/Supabase) | ⏳ Planned |
+| **Phase 13** | Developer Tools (CLI + DevTools) | ⏳ Planned |
+| **Phase 14** | Ready-to-use UI Components | ⏳ Planned |
+| **Phase 15** | Example App + pub.dev Release | ⏳ Planned |
+
+---
+
+## Detailed Roadmap
+
+### ✅ Phase 0 — Architecture *(Completed)*
+
+- `SyncAdapter<T>`: Contract for connecting user models to the sync engine (`toJson`, `fromJson`, `getId`, `getUpdatedAt`, `endpoint`).
+- `SyncOperation` + `SyncOperationType` (`create` / `update` / `delete`) + `SyncOperationStatus`.
+- `LocalStorage` (abstract): Contract that every storage implementation must implement.
+- `OfflineSync`: Main public API (`initialize`, `register`, `save`, `delete`, `getAll`, `sync`).
+- Documentation for five core architectural decisions (`ARCHITECTURE.md`).
+
+### ✅ Phase 1 — Database + Queue *(Completed)*
+
+- `EntitiesTable` + `SyncOperationsTable` (Drift/SQLite).
+- `DriftLocalStorage`: Concrete implementation of `LocalStorage`.
+- `save()`: Saves data locally immediately and adds an operation to the queue.
+- `delete()`: Performs a soft delete and enqueues a `delete` operation.
+- `getAll()`: Returns all non-deleted records.
+- Successful end-to-end testing.
+
+### ✅ Phase 2 — Network Layer *(Completed)*
+
+> **Goal:** Enable `sync()` to send queued operations over HTTP.
+
+- [`offline_sync_dio`](/docs/adapters/network-adapters/dio) package.
+- `SyncTransport` contract (uses `SyncAdapter.endpoint`).
+- Automatically selects the appropriate HTTP method based on `SyncOperationType` (`POST` / `PUT` / `DELETE`).
+- **On successful request:** `removeOperation`.
+- **On failure:** `updateOperationStatus(failed)` instead of removing the operation.
+
+### ✅ Phase 3 — Retry + Backoff *(Completed)*
+
+- Exponential Backoff strategy for failed requests.
+- Uses the existing `retryCount` field in `SyncOperation`.
+- Configurable maximum retry limit (`maxAttempts`) with timeout and 5xx error handling.
+- See the [Retry Strategy](/docs/guides/retry-strategy) guide for complete details.
+
+### ✅ Phase 4 — Conflict Resolution *(Completed)*
+
+- Compare `updatedAt` / `version` between the server and the local device.
+- Four conflict resolution strategies built-in:
+  - **Server Wins**
+  - **Client Wins**
+  - **Last Update Wins**
+  - **Manual** (Custom developer callback)
+- Uses the existing `version` field in `EntitiesTable`.
+- See the [Conflict Resolution](/docs/guides/conflict-resolution) guide for complete details.
+
+### ⏳ Phase 5 — Connectivity Detection
+
+- Enable `connectivity_plus` (already included in `pubspec.yaml` but not yet integrated).
+- Automatically trigger `sync()` the exact moment network connectivity is restored on the device.
+
+### ⏳ Phase 6 — Background Sync
+
+- Integration with `WorkManager` for background tasks.
+- Continue synchronization cycles even when the application is closed or in the background.
+
+### ⏳ Phase 7 — Delta Sync
+
+- Upload and download only changed fields/records (diffs) instead of syncing the entire payload.
+
+### ⏳ Phase 8 — Compression
+
+- GZIP/Brotli compression wrappers for large request payloads to reduce mobile bandwidth usage.
+
+### ⏳ Phase 9 — Encryption
+
+- Encrypt sensitive data stored in SQLite (suitable for healthcare, finance, and other security-sensitive offline apps).
+
+### ⏳ Phase 10 — Logging & Observability
+
+- Structured logs for synchronization events (success, failure, conflict resolutions) with custom logger integrations.
+
+### ⏳ Phase 11 — Alternative Storage Adapters
+
+- `offline_sync_isar`
+- `offline_sync_hive`
+
+*Both will implement the same abstract `LocalStorage` contract.*
+
+### ⏳ Phase 12 — Alternative Network Adapters
+
+- `offline_sync_graphql`
+- `offline_sync_firebase`
+- `offline_sync_supabase`
+
+### ⏳ Phase 13 — Developer Tools
+
+- `offline_sync_cli`: Codegen tool to generate `@SyncModel()` adapters instead of writing `SyncAdapter` implementations manually.
+- `offline_sync_devtools`: Flutter DevTools extension tab for monitoring the current synchronization queue and storage live.
+
+### ⏳ Phase 14 — Ready-to-use UI Components
+
+- `offline_sync_ui`: Prebuilt Material and Cupertino widgets such as:
+  - Offline status banner/bar.
+  - Interactive sync status indicators.
+
+### ⏳ Phase 15 — Example App + pub.dev Release
+
+- Complete `offline_sync_example` demonstrating a real-world multi-entity offline workflow.
+- Complete API documentation.
+- Publish all monorepo packages to pub.dev.

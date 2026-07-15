@@ -3,3 +3,131 @@ sidebar_position: 12
 title: Contributing
 slug: /Contributing
 ---
+# Contributing to Offline Sync
+
+Thanks for your interest in contributing! This document covers how the
+repo is organized and how to get a working dev setup for any of the
+packages.
+
+## Repository structure
+
+This is a [Dart/Flutter pub workspace](https://dart.dev/tools/pub/workspaces)
+monorepo — packages share a single `pub` resolution instead of each
+being published/resolved independently during development.
+
+```
+packages/
+├── offline_sync_core/     # storage-agnostic contracts + sync engine
+├── offline_sync_dio/      # Dio-based SyncTransport implementation
+└── offline_sync_drift/    # Drift-based LocalStorage implementation
+```
+
+Every package has its own `pubspec.yaml` with `resolution: workspace`, its
+own `test/` directory, and its own `README.md`. `offline_sync_core` has no
+dependency on any other package in this repo — `offline_sync_dio` and
+`offline_sync_drift` depend on `offline_sync_core` only, never on each
+other. Keep it that way: adapters implement `core`'s contracts, they don't
+know about each other.
+
+## Getting started
+
+1. Fork and clone the repo, then checkout the `dev` branch (default branch
+   for ongoing work — `main` tracks released versions).
+2. Make sure you have a recent Flutter SDK installed (`flutter --version`
+   — check the `environment:` block in the package's `pubspec.yaml` for
+   the minimum supported version).
+3. From the repo root, resolve dependencies for the whole workspace:
+   ```bash
+   flutter pub get
+   ```
+4. Run a single package's tests to confirm your setup works:
+   ```bash
+   cd packages/offline_sync_core
+   flutter test
+   ```
+
+## Where to make your change
+
+| You want to... | Package |
+|---|---|
+| Change the public API (`OfflineSync.save`, `sync`, etc.) | `offline_sync_core` |
+| Add/change a conflict resolution strategy | `offline_sync_core` (`lib/src/conflict/`) |
+| Add/change retry/backoff behavior | `offline_sync_core` (`lib/src/retry/`) |
+| Change a contract (`SyncAdapter`, `LocalStorage`, `SyncTransport`) | `offline_sync_core` (`lib/src/contracts/`) |
+| Fix or extend the Dio transport | `offline_sync_dio` |
+| Fix or extend Drift-backed storage | `offline_sync_drift` |
+| Add a new storage or network adapter | New package, `offline_sync_<name>`, depending only on `offline_sync_core` |
+
+If you're not sure which package a change belongs in, open an issue or
+draft PR early and ask — it's much easier to redirect before code is
+written than after.
+
+## Making changes
+
+- **Contracts are the source of truth.** If you're changing behavior
+  that's defined by an abstract class in `offline_sync_core/lib/src/contracts/`
+  (`SyncAdapter`, `LocalStorage`, `SyncTransport`), update the doc
+  comments on the contract itself, not just the implementation — every
+  adapter package depends on that contract meaning the same thing.
+- **Don't hardcode transport/storage assumptions into `core`.** `core`
+  should never import `dio`, `drift`, or any other concrete package —
+  that's the entire point of the contracts. If you find yourself doing
+  this, the code likely belongs in an adapter package instead.
+- **Match existing doc-comment style.** Public classes and methods in this
+  codebase carry fairly detailed `///` doc comments explaining *why*, not
+  just *what* — see `conflict_resolver.dart` or `sync_transport.dart` for
+  the level of detail expected on anything part of the public API.
+- **Keep `README.md` in sync.** If you change a package's public API,
+  update its `README.md` in the same PR — package docs are generated from
+  these files, and a stale example is worse than none.
+
+## Tests
+
+Each package has its own `test/` directory. At minimum:
+
+- Changes to `offline_sync_core`'s engine (`sync()`, conflict resolution,
+  retry logic) need a test in `offline_sync_core/test/`.
+- Changes to `offline_sync_dio`'s verb/status-code mapping need a test in
+  `offline_sync_dio/test/dio_sync_transport_test.dart` — see that file
+  for the pattern of swapping `dio.httpClientAdapter` for a fake instead
+  of hitting a real network.
+- Changes to `offline_sync_drift`'s schema or storage logic need a test in
+  `offline_sync_drift/test/`.
+
+Run tests for the package you touched:
+
+```bash
+cd packages/<package_you_changed>
+flutter test
+```
+
+A PR that changes behavior without a corresponding test change will
+likely be asked to add one before merging.
+
+## Commit messages & PRs
+
+- Keep commits focused — one logical change per commit where reasonable.
+- Reference the package(s) affected in your PR title, e.g.
+  `[core] Add manual conflict resolver` or `[dio] Fix 409 body parsing`.
+- Describe *why* the change is needed, not just what changed — especially
+  for anything touching a contract or the conflict/retry logic, where the
+  reasoning is usually as important as the diff.
+- Link any related issue.
+
+## Reporting bugs / requesting features
+
+Open an issue with:
+- Which package is affected.
+- A minimal reproduction if it's a bug (a failing test is ideal).
+- What you expected vs. what happened.
+
+## Code of Conduct
+
+Be respectful and constructive. This project welcomes contributors of all
+experience levels — if something in this guide is unclear, opening an
+issue to ask is always welcome.
+
+## License
+
+By contributing, you agree that your contributions will be licensed under
+the same license as the project (MIT — see `LICENSE`).

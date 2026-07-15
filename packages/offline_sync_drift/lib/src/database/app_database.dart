@@ -14,7 +14,7 @@ part 'app_database.g.dart';
 /// The concrete Drift database backing [DriftLocalStorage].
 ///
 /// NOTE: `app_database.g.dart` is generated. After pulling this file, run:
-/// `dart run build_runner build --delete-conflicting-outputs`
+/// `dart run build_runner build --force-jit`
 /// from `packages/offline_sync_drift/`.
 @DriftDatabase(tables: [EntitiesTable, SyncOperationsTable])
 class AppDatabase extends _$AppDatabase {
@@ -24,7 +24,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(QueryExecutor executor) : super(executor);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -33,7 +33,19 @@ class AppDatabase extends _$AppDatabase {
           if (from < 2) {
             // Phase 3: retry/backoff needs to know when an operation is
             // next eligible to be retried.
-            await m.addColumn(syncOperationsTable, syncOperationsTable.nextRetryAt);
+            await m.addColumn(
+              syncOperationsTable,
+              syncOperationsTable.nextRetryAt,
+            );
+          }
+          if (from < 3) {
+            // Phase 4: conflict resolution needs each queued operation to
+            // remember the optimistic-concurrency version it was built
+            // against (SyncOperation.localVersion).
+            await m.addColumn(
+              syncOperationsTable,
+              syncOperationsTable.localVersion,
+            );
           }
         },
       );

@@ -3,3 +3,172 @@ sidebar_position: 2
 title: Getting Started
 slug: /Getting Started
 ---
+
+
+
+#  Getting Started
+
+This guide walks you through installing **Offline Sync Kit** and setting up your first offline-first synchronization workflow in Flutter.
+
+---
+
+##  1. Installation
+
+Add the core package along with the default SQLite and network adapters to your `pubspec.yaml` file:
+
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Core offline sync engine
+  offline_sync: ^0.0.1
+
+  # Default SQLite storage adapter
+  offline_sync_drift: ^0.0.1
+
+  # Default HTTP/Dio network adapter
+  offline_sync_dio: ^0.0.1
+```
+
+Then run:
+
+```bash
+flutter pub get
+```
+
+---
+
+##  2. Define Your Sync Adapter
+
+To let the engine know how to synchronize your data, define your model and implement the `SyncAdapter<T>` contract.
+
+This tells the library:
+
+- How to serialize and deserialize your model.
+- How to identify each record.
+- Which endpoint should receive synchronization requests.
+
+```dart
+import 'package:offline_sync/offline_sync.dart';
+
+class Task {
+  final String id;
+  final String title;
+  final DateTime updatedAt;
+  final int version;
+
+  Task({
+    required this.id,
+    required this.title,
+    required this.updatedAt,
+    required this.version,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'updatedAt': updatedAt.toIso8601String(),
+        'version': version,
+      };
+
+  factory Task.fromJson(Map<String, dynamic> json) => Task(
+        id: json['id'],
+        title: json['title'],
+        updatedAt: DateTime.parse(json['updatedAt']),
+        version: json['version'] ?? 1,
+      );
+}
+
+/// Register this adapter to handle synchronization for Task objects.
+class TaskAdapter implements SyncAdapter<Task> {
+  @override
+  String getId(Task task) => task.id;
+
+  @override
+  DateTime getUpdatedAt(Task task) => task.updatedAt;
+
+  @override
+  int getVersion(Task task) => task.version;
+
+  @override
+  String get endpoint => '/tasks';
+
+  @override
+  Map<String, dynamic> toJson(Task task) => task.toJson();
+
+  @override
+  Task fromJson(Map<String, dynamic> json) => Task.fromJson(json);
+}
+```
+
+---
+
+##  3. Initialize & Register
+
+Initialize the synchronization engine before running your Flutter application.
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:offline_sync/offline_sync.dart';
+import 'package:offline_sync_drift/offline_sync_drift.dart';
+import 'package:offline_sync_dio/offline_sync_dio.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await OfflineSync.initialize(
+    storage: DriftLocalStorage(),
+    transport: DioSyncTransport(
+      baseUrl: 'https://api.yourserver.com/v1',
+    ),
+  );
+
+  OfflineSync.register<Task>(TaskAdapter());
+
+  runApp(const MyApp());
+}
+```
+
+---
+
+##  4. Read, Write & Sync
+
+Saving data writes it immediately to the local database and automatically queues it for synchronization.
+
+```dart
+final task = Task(
+  id: '1',
+  title: 'My First Offline Task',
+  updatedAt: DateTime.now(),
+  version: 1,
+);
+
+await OfflineSync.save<Task>(task);
+```
+
+Read data directly from the local database:
+
+```dart
+final List<Task> tasks = await OfflineSync.getAll<Task>();
+```
+
+Synchronize all pending operations with your backend:
+
+```dart
+await OfflineSync.sync();
+```
+
+---
+
+## 5. That's It!
+
+Your application is now offline-first.
+
+Every write operation is:
+
+- Saved instantly to the local database.
+- Added to the synchronization queue.
+- Sent to your backend when synchronization runs.
+- Automatically retried on failure.
+- Protected by built-in conflict resolution strategies.

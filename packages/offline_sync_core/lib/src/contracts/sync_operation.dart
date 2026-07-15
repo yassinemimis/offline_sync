@@ -14,15 +14,14 @@ enum SyncOperationStatus {
   inProgress,
 
   /// A send attempt failed but is still within the retry budget
-  /// ([RetryPolicy.maxAttempts]). Picked up again once [SyncOperation.
-  /// nextRetryAt] has passed.
+  /// (`RetryPolicy.maxAttempts`). Picked up again once
+  /// [SyncOperation.nextRetryAt] has passed.
   failed,
 
-  /// Every retry attempt has been used up ([RetryPolicy.maxAttempts])
-  /// without success, or the server rejected the operation in a way that
-  /// will never succeed on its own (a non-retriable [SyncTransportResult],
-  /// e.g. a 4xx). No longer retried automatically — needs manual
-  /// intervention (inspect and re-enqueue, or discard).
+  /// Every retry attempt has been used up without success, or the server
+  /// rejected the operation in a way that will never succeed on its own
+  /// (a non-retriable `SyncTransportResult`, e.g. a 4xx). No longer
+  /// retried automatically — needs manual intervention.
   exhausted,
 
   /// Sent and acknowledged by the server. Safe to remove from the queue.
@@ -45,6 +44,7 @@ class SyncOperation {
     this.status = SyncOperationStatus.pending,
     this.retryCount = 0,
     this.nextRetryAt,
+    this.localVersion = 0,
   });
 
   /// Queue-row id (not the entity id).
@@ -66,14 +66,21 @@ class SyncOperation {
 
   final SyncOperationStatus status;
 
-  /// Incremented on every failed send attempt; consumed by [RetryPolicy].
+  /// Incremented on every failed send attempt; consumed by `RetryPolicy`.
   final int retryCount;
 
-  /// Earliest time this operation should be attempted again, set by
-  /// [RetryPolicy.nextRetryAt] after a retriable failure. `null` for
-  /// operations that have never failed (still [SyncOperationStatus.
-  /// pending]) — those are always eligible immediately.
+  /// Earliest time this operation should be attempted again. `null` for
+  /// operations that have never failed.
   final DateTime? nextRetryAt;
+
+  /// The optimistic-concurrency baseline this operation was built against
+  /// — i.e. `EntitiesTable.version` *as last confirmed with the server*,
+  /// not a count of local edits. Sent by the transport (e.g. as an
+  /// `If-Match`-style token) so the server can detect that someone else
+  /// changed this entity in between and respond with
+  /// `SyncTransportResult.conflict(...)` instead of silently overwriting.
+  /// Unused (`0`) for `create` — there's nothing to conflict with yet.
+  final int localVersion;
 
   SyncOperation copyWith({
     SyncOperationStatus? status,
@@ -90,6 +97,7 @@ class SyncOperation {
       status: status ?? this.status,
       retryCount: retryCount ?? this.retryCount,
       nextRetryAt: nextRetryAt ?? this.nextRetryAt,
+      localVersion: localVersion,
     );
   }
 }
