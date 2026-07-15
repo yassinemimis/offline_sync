@@ -1,4 +1,170 @@
 ---
+id: conflict-resolution
+title: Conflict Resolution
 sidebar_position: 4
+description: How Offline Sync detects and resolves conflicts between local and server versions of an entity.
 ---
-# Conflict Resolution
+
+A conflict happens when the client tries to push a change based on a local
+baseline (`SyncOperation.localVersion`) that no longer matches what the
+server currently has. This page covers how conflicts are detected, how the
+built-in strategies resolve them, and how to plug in your own.
+
+## How a conflict is detected
+
+Every `update` and `delete` operation carries the entity's
+`localVersion` — the optimistic-concurrency token it was based on. The
+configured [`SyncTransport`](/docs/adapters/network-adapters/dio) sends
+that token to the server on every write.
+
+For `offline_sync_dio`, this token travels as `_version` — in the request
+body for `PUT`, in the query string for `DELETE` (some proxies drop DELETE
+bodies, so the query string is used instead). If the server responds
+`409` with its current copy of the entity, the transport maps that into a
+conflict result instead of a plain failure:
+
+```dart
+if (status == 409) {
+  final body = Map<String, dynamic>.from(raw);
+  final serverVersion = (body.remove('_version') as num?)?.toInt() ?? 0;
+  return SyncTransportResult.conflict(
+    serverData: body,
+    serverVersion: serverVersion,
+  );
+}
+```
+
+This is a convention `offline_sync_dio` assumes about your backend, not
+something hardcoded into `offline_sync_core` — a different transport is
+free to detect conflicts differently.
+
+## The `SyncConflict` object
+
+Once `sync()` sees `result.isConflict`, it builds a `SyncConflict` with
+everything a resolver needs to decide a winner:
+
+```dart
+class SyncConflict {
+  final String entityName;
+  final String entityId;
+
+  final Map<String, dynamic> localData;
+  final int localVersion;
+  final DateTime localUpdatedAt;
+
+  final Map<String, dynamic> serverData;
+  final int serverVersion;
+  final DateTime serverUpdatedAt;
+}
+```
+
+## Built-in strategies
+
+Pass a `ConflictResolver` when initializing. The default, if you don't
+pass one, is `lastWriteWins`.
+
+```dart
+await OfflineSync.initialize(
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(dio),
+  conflictResolver: const ConflictResolver.lastWriteWins(),
+);
+```
+
+| Strategy | Constructor | Winner |
+|---|---|---|
+| Server wins | `ConflictResolver.serverWins()` | Always `serverData` |
+| Client wins | `ConflictResolver.clientWins()` | Always `localData` |
+| Last write wins | `ConflictResolver.lastWriteWins()` | Whichever of `localUpdatedAt` / `serverUpdatedAt` is more recent |
+| Manual | `ConflictResolver.manual(resolver)` | Whatever your callback returns |
+
+### Manual resolution
+
+Use this when the winner can't be decided automatically — e.g. show the
+user a merge screen and let them pick, or hand-merge specific fields:
+
+```dart
+await OfflineSync.initialize(
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(dio),
+  conflictResolver: ConflictResolver.manual((conflict) async {
+    // e.g. await a dialog, or apply your own merge rules
+    final merged = Map<String, dynamic>.from(conflict.serverData);
+    merged['title'] = conflict.localData['title']; // keep local edit to one field
+    return merged;
+  }),
+);
+```
+
+It's fine for the callback to be slow (e.g. it awaits a dialog the user
+has to respond to) — `sync()` simply awaits it before moving on to the
+next queued operation.
+
+## What happens after resolution
+
+`resolve()` always returns the winning JSON payload. Internally, the
+engine checks — using `identical()` — whether the returned map is the
+*exact same object* as `conflict.serverData` or `conflict.localData`,
+which tells it whether the server already has this content:
+
+- **Server wins (`identical` to `serverData`)** — the local copy is
+  overwritten with the server's data and marked synced. Nothing more to
+  push.
+- **Client wins / last-write-wins picks local / manual merge** — treated
+  as content the server doesn't have yet. The entity is reconciled
+  locally with the server's `version` as the new baseline, and a fresh
+  `update` operation is enqueued so the next `sync()` call pushes the
+  winning content — this time with a baseline the server will accept.
+
+This is why a manual resolver that builds a **new** merged map (rather
+than returning `conflict.serverData` or `conflict.localData` directly) is
+correctly treated as "still needs pushing" — the server doesn't have that
+exact merge yet either.
+
+```dart
+final winningData = await _conflictResolver.resolve(conflict);
+final winnerIsServer = identical(winningData, conflict.serverData);
+
+await storage.reconcileEntity(
+  entityName: op.entityName,
+  entityId: op.entityId,
+  data: winningData,
+  version: conflict.serverVersion,
+  updatedAt: winnerIsServer ? conflict.serverUpdatedAt : DateTime.now(),
+  isSynced: winnerIsServer,
+);
+```
+
+## Conflicts on delete
+
+Deleting an entity that the server has since modified is also a
+conflict. It's handled separately from update conflicts, since there's no
+"merge" to compute — only whether the delete should proceed:
+
+- **Client wins** — the delete is re-enqueued with the server's version
+  as the new baseline, so it can be retried and accepted.
+- **Every other strategy** (server wins, last-write-wins, manual) — the
+  delete is abandoned and the local copy is reconciled with the server's
+  current data instead, since the entity is considered to still exist.
+
+## Observing conflicts
+
+Pass `onConflict` to `initialize` to be notified whenever a conflict was
+resolved — useful for logging, analytics, or surfacing a toast to the
+user:
+
+```dart
+await OfflineSync.initialize(
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(dio),
+  onConflict: (conflict, winningData) {
+    print('Resolved conflict on ${conflict.entityName}/${conflict.entityId}');
+  },
+);
+```
+
+## Related
+
+- [Network Layer](/docs/guides/network-layer)
+- [Retry Strategy](/docs/guides/retry-strategy)
+- [offline_sync_dio](/docs/adapters/network-adapters/dio)
