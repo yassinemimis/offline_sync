@@ -7,75 +7,94 @@ description: How Offline Sync sends queued operations to your backend through a 
 
 # Network Layer
 
-The **Network Layer** is responsible for taking operations out of the [Queue Engine](/docs/guides/queue-engine) and delivering them to the backend. It is fully pluggable through [Network Adapters](/docs/adapters/network-adapters), so the same sync logic works whether you talk to a REST API, GraphQL, Firebase, or Supabase.
+The **Network Layer** is responsible for taking operations out of the [Queue Engine](/docs/guides/queue-engine) and delivering them to the backend. It's pluggable via the `SyncTransport` contract — [Network Adapters](/docs/adapters/network-adapters) like `offline_sync_dio` are reference implementations, not the only option.
 
 ## Responsibilities
 
 - Translate a queued operation into a concrete network request.
-- Execute the request through the configured adapter (e.g. [Dio](/docs/adapters/network-adapters/dio)).
-- Report success, failure, or a conflict back to the Sync Engine.
-- Respect [Connectivity Detection](/docs/guides/connectivity-detection) — no requests are attempted while offline.
+- Execute the request.
+- Report success, failure, or a conflict back to the sync engine via a `SyncTransportResult`.
+
+Unlike storage, there's no separate "connectivity gate" that blocks requests while offline — `sync()` always attempts eligible operations. If the device is genuinely offline, the request simply fails (timeout / no route to host), which the [Retry Strategy](/docs/guides/retry-strategy) treats as a normal retriable failure. [Connectivity Detection](/docs/guides/connectivity-detection) doesn't prevent attempts; it triggers *additional* `sync()` calls when the device comes back online, so queued work doesn't sit around waiting for the next manual sync or app restart.
 
 ## Basic Setup
 
+`core` never depends on `dio` directly — you construct your own `Dio` instance exactly as you would anywhere else in your app, and hand it to `DioSyncTransport`:
+
 ```dart
-OfflineSync.configure(
-  network: DioNetworkAdapter(
-    baseUrl: 'https://api.example.com',
-  ),
+import 'package:dio/dio.dart';
+import 'package:offline_sync_core/offline_sync_core.dart';
+import 'package:offline_sync_dio/offline_sync_dio.dart';
+import 'package:offline_sync_drift/offline_sync_drift.dart';
+
+final dio = Dio(BaseOptions(
+  baseUrl: 'https://api.example.com',
+  headers: {'Authorization': 'Bearer <token>'},
+));
+
+await OfflineSync.initialize(
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(dio),
 );
 ```
 
-Swapping the backend only means swapping the adapter — the rest of your app code stays unchanged:
+`offline_sync_dio` has no opinion on `baseUrl`, headers, interceptors, or timeouts — all of that is ordinary `Dio`/`BaseOptions` configuration, done once, on your own `Dio` instance:
 
 ```dart
-OfflineSync.configure(
-  network: SupabaseNetworkAdapter(
-    client: supabaseClient,
-  ),
-);
+final dio = Dio(BaseOptions(
+  baseUrl: 'https://api.example.com',
+  connectTimeout: const Duration(seconds: 10),
+  headers: {'Authorization': 'Bearer <token>'},
+));
 ```
+
+Swapping backends means swapping the transport passed to `initialize()` — the rest of your app (`save`, `getAll`, `sync`) stays unchanged. A `SupabaseSyncTransport` / GraphQL equivalent isn't built yet — see [Roadmap](/docs/roadmap).
 
 ## Request Lifecycle
 
-1. The Queue Engine dequeues an operation.
-2. The Network Layer maps it to a request (e.g. `POST /users`, `PATCH /users/:id`, `DELETE /users/:id`).
-3. The request is sent through the active adapter.
-4. The response is classified as:
-   - **Success** → operation removed from the queue.
-   - **Recoverable failure** (timeout, 5xx) → passed to the [Retry Strategy](/docs/guides/retry-strategy).
-   - **Conflict** (409, version mismatch) → passed to Conflict Resolution.
-   - **Permanent failure** (4xx other than conflict) → operation is marked as failed and surfaced to the app.
+1. `sync()` pulls the next eligible operation off the queue (see [Queue Engine](/docs/guides/queue-engine)).
+2. `DioSyncTransport` maps `SyncOperation.type` to a verb against `SyncAdapter.endpoint`:
 
-## Custom Adapters
+   | Type | Verb | URL | Body |
+   |---|---|---|---|
+   | `create` | `POST` | `endpoint` | operation payload |
+   | `update` | `PUT` | `endpoint/entityId` | payload + `_version` (the client's baseline, for optimistic-concurrency checking) |
+   | `delete` | `DELETE` | `endpoint/entityId` | `{ "_version": ... }` |
 
-You can implement your own adapter by conforming to the core network contract:
+3. The response becomes a `SyncTransportResult`:
+   - **Success** → operation removed from the queue; the entity is marked synced. See [Queue Engine](/docs/guides/queue-engine).
+   - **Retriable failure** (timeout, no connection, 5xx) → handed to the [Retry Strategy](/docs/guides/retry-strategy).
+   - **Non-retriable failure** (4xx other than 409) → the operation is marked `exhausted` once the retry budget — if any — is exhausted. There's currently no callback surfacing this to the app; see [Retry Strategy → Giving Up](/docs/guides/retry-strategy#giving-up).
+   - **Conflict** (HTTP `409`) → the response body is treated as the server's current copy of the entity, handed to [Conflict Resolution](/docs/guides/conflict-resolution).
+
+## Custom Transports
+
+Implement `SyncTransport` directly if your backend isn't REST/Dio-shaped (GraphQL, Firebase, a different verb convention):
 
 ```dart
-class MyNetworkAdapter implements NetworkAdapter {
+class MyTransport implements SyncTransport {
   @override
-  Future<SyncResponse> send(SyncRequest request) async {
-    // your custom transport logic
+  Future<SyncTransportResult> send(
+    SyncOperation operation,
+    SyncAdapter adapter,
+  ) async {
+    // Inspect operation.type, operation.payload, operation.localVersion,
+    // and adapter.endpoint to build your request.
+    //
+    // Return one of:
+    return const SyncTransportResult.success();
+    // return SyncTransportResult.failure(retriable: true, message: '...');
+    // return SyncTransportResult.conflict(serverData: {...}, serverVersion: 5);
   }
 }
 ```
 
-## Timeouts and Headers
+`offline_sync_dio` is the reference implementation, not a required dependency — `core` only ever depends on the `SyncTransport` interface.
 
-```dart
-OfflineSync.configure(
-  network: DioNetworkAdapter(
-    baseUrl: 'https://api.example.com',
-    timeout: const Duration(seconds: 10),
-    defaultHeaders: {
-      'Authorization': 'Bearer <token>',
-    },
-  ),
-);
-```
 
 ## Related
 
 - [Queue Engine](/docs/guides/queue-engine)
 - [Retry Strategy](/docs/guides/retry-strategy)
+- [Conflict Resolution](/docs/guides/conflict-resolution)
 - [Network Adapters](/docs/adapters/network-adapters)

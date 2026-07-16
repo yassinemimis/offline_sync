@@ -28,9 +28,9 @@ An overview of the library's development phases and the current status of each o
     backgroundColor: 'var(--ifm-color-success-contrast-background)',
     opacity: 0.9
   }}>
-    <h4 style={{margin: 0, color: 'var(--ifm-color-success-darker)'}}>✅ Done (Phases 0 - 4)</h4>
+    <h4 style={{margin: 0, color: 'var(--ifm-color-success-darker)'}}>✅ Done (Phases 0 - 5)</h4>
     <p style={{fontSize: '0.85rem', margin: '0.5rem 0 0 0'}}>
-      Architecture Core, SQLite Database, Network (Dio), Exponential Retry, and Conflict Resolution are fully operational.
+      Architecture Core, SQLite Database, Network (Dio), Exponential Retry, Conflict Resolution are fully operational , and Connectivity Detection.
     </p>
   </div>
 
@@ -44,7 +44,7 @@ An overview of the library's development phases and the current status of each o
   }}>
     <h4 style={{margin: 0, color: 'var(--ifm-color-warning-darker)'}}>⚡ Active Focus</h4>
     <p style={{fontSize: '0.85rem', margin: '0.5rem 0 0 0'}}>
-      <strong>Phase 5: Connectivity Detection</strong>. Integrating <code>connectivity_plus</code> to trigger automatic syncs.
+      <strong>Phase 6: Background Sync</strong>. Integrating <code>background_sync</code> to trigger automatic syncs.
     </p>
   </div>
 
@@ -57,7 +57,7 @@ An overview of the library's development phases and the current status of each o
   }}>
     <h4 style={{margin: 0, color: 'var(--ifm-color-emphasis-700)'}}>⏳ Future Backlog</h4>
     <p style={{fontSize: '0.85rem', margin: '0.5rem 0 0 0'}}>
-      Phases 6 to 15 (Background Sync, Delta Sync, Isar/Hive Adapters, and DevTools/CLI tooling).
+      Phases 7 to 15 ( Delta Sync, Isar/Hive Adapters, and DevTools/CLI tooling).
     </p>
   </div>
 
@@ -74,8 +74,8 @@ An overview of the library's development phases and the current status of each o
 | **Phase 2** | Network Layer (HTTP/Dio) | ✅ Completed |
 | **Phase 3** | Retry + Backoff | ✅ Completed |
 | **Phase 4** | Conflict Resolution | ✅ Completed |
-| **Phase 5** | Connectivity Detection | ⏳ Coming Soon |
-| **Phase 6** | Background Sync (WorkManager) | ⏳ Planned |
+| **Phase 5** | Connectivity Detection | ✅ Coming Soon |
+| **Phase 6** | Background Sync (WorkManager) | ⏳ Coming Soon |
 | **Phase 7** | Delta Sync | ⏳ Planned |
 | **Phase 8** | Compression (GZIP) | ⏳ Planned |
 | **Phase 9** | Encryption | ⏳ Planned |
@@ -135,7 +135,7 @@ An overview of the library's development phases and the current status of each o
 - Uses the existing `version` field in `EntitiesTable`.
 - See the [Conflict Resolution](/docs/guides/conflict-resolution) guide for complete details.
 
-### ⏳ Phase 5 — Connectivity Detection
+### ✅ Phase 5 — Connectivity Detection
 
 - Enable `connectivity_plus` (already included in `pubspec.yaml` but not yet integrated).
 - Automatically trigger `sync()` the exact moment network connectivity is restored on the device.

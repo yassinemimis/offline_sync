@@ -82,4 +82,11 @@ Future<int> markSynced({
   });
 
   Future<void> removeOperation(String operationId);
+
+  /// Every operation still in the queue, regardless of whether it's
+/// eligible to be attempted right now — unlike [getPendingOperations],
+/// this includes `failed` rows still waiting out their backoff window.
+/// Meant for UI display ("3 changes not yet synced"), not for driving
+/// the sync loop itself.
+Future<int> totalQueuedOperationsCount();
 }

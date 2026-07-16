@@ -21,9 +21,9 @@ In an offline-first app, a user action (create, update, delete) cannot always be
 
 1. **Capture** — Every call like `OfflineSync.save(user)` creates an operation record instead of hitting the network directly.
 2. **Persist** — The operation is written to local storage (via a [Storage Adapter](/docs/adapters/storage-adapters)) before returning control to the caller.
-3. **Enqueue** — The operation is appended to an ordered queue, tagged with metadata (timestamp, entity type, operation type, retry count).
-4. **Process** — A background worker drains the queue, sending operations through the [Network Layer](/docs/guides/network-layer).
-5. **Acknowledge** — On success, the operation is removed from the queue. On failure, it is handed to the [Retry Strategy](/docs/guides/retry-strategy).
+3. **Enqueue** — The operation is appended to an ordered queue, tagged with metadata (timestamp, entity type, operation type, retry count, and the local `version` baseline used for conflict detection).
+4. **Sync** — `sync()` drains the queue, sending operations through the [Network Layer](/docs/guides/network-layer). This runs when you call it manually, opportunistically right after `save`/`delete`, or automatically when connectivity comes back (see [Connectivity Detection](/docs/guides/connectivity-detection)) — there is no persistent background worker yet; syncing while the app is fully closed is planned for a later release (see [Roadmap](/docs/roadmap)).
+5. **Acknowledge** — On success, the operation is removed from the queue. On failure, it is handed to the [Retry Strategy](/docs/guides/retry-strategy). On a version conflict, it is handed to [Conflict Resolution](/docs/guides/conflict-resolution) instead.
 
 ```dart
 // This call is instant and safe, even with no connection.
@@ -40,28 +40,33 @@ await OfflineSync.save(user);
 
 ## Ordering Guarantees
 
-Operations belonging to the **same entity** are always processed in the order they were created. Operations on **different entities** may be processed concurrently, depending on the configured concurrency level.
+All queued operations — regardless of which entity they belong to — are processed **sequentially, in the order they were created**. There is currently no per-entity or configurable concurrency; `sync()` sends one operation, waits for the result, then moves to the next.
+
+Calling `sync()` while a sync is already running doesn't start a second, overlapping pass — the second call simply awaits the one already in flight. This means it's safe to call `sync()` from multiple places (a manual button press, an opportunistic call after `save`, and an automatic call when connectivity returns) without worrying about them racing each other.
+
+## Reading queue status
+
+Two counters are available, and it's easy to reach for the wrong one:
+
+| Method | Counts | Use for |
+|---|---|---|
+| `OfflineSync.pendingOperationsCount()` | Operations eligible to be sent **right now** — excludes `failed` operations still waiting out a [Retry Strategy](/docs/guides/retry-strategy) backoff window. | Internal sync logic. Rarely what you want in a UI. |
+| `OfflineSync.totalQueuedOperationsCount()` | **Every** unsynced operation, including ones currently mid-backoff. | UI badges/counters — "3 changes not yet synced". This is almost always the right one for user-facing display. |
+
+A device that just failed a send attempt will show `pendingOperationsCount() == 0` for the next few seconds (nothing is eligible to retry *yet*) while `totalQueuedOperationsCount() == 1` (the change is still genuinely unsynced). Showing the first number in a UI can misleadingly read as "everything is synced" when it isn't.
 
 ```dart
-OfflineSync.configure(
-  queue: QueueConfig(
-    concurrency: 4,
-    persistImmediately: true,
-  ),
-);
+final pending = await OfflineSync.totalQueuedOperationsCount();
+// e.g. show "3 changes pending" in an AppBar chip
 ```
 
 ## Inspecting the Queue
 
-During development, you can inspect pending operations using [DevTools](/docs/tooling/devtools):
-
-```dart
-final pending = await OfflineSync.queue.pendingOperations();
-print(pending.length);
-```
+A dedicated queue-inspector UI is planned as part of [DevTools](/docs/tooling/devtools) (not yet available). Until then, use `totalQueuedOperationsCount()` above for a simple count, or query your configured [Storage Adapter](/docs/adapters/storage-adapters) directly for full operation details during development.
 
 ## Related
 
 - [Network Layer](/docs/guides/network-layer)
 - [Retry Strategy](/docs/guides/retry-strategy)
+- [Conflict Resolution](/docs/guides/conflict-resolution)
 - [Storage Adapters](/docs/adapters/storage-adapters)
