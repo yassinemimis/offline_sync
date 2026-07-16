@@ -11,6 +11,7 @@ workspace:
   - packages/offline_sync_core
   - packages/offline_sync_drift
   - packages/offline_sync_dio
+  - packages/offline_sync_workmanager
 
 melos:
   name: offline_sync

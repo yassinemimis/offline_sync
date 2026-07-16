@@ -60,7 +60,7 @@ why they were made.
 - [x] **Phase 4 — Conflict resolution.** Server Wins / Client Wins /
       Last-Write-Wins / Manual, based on the `version` field already in
       `EntitiesTable`.
-- [ ] **Phase 5 — Connectivity detection.** Auto-trigger `sync()` when the
+- [x] **Phase 5 — Connectivity detection.** Auto-trigger `sync()` when the
       device comes back online.
 - [ ] **Phase 6 — Background sync.** Keep syncing while the app is closed.
 - [ ] **Phase 7 — Delta sync.** Send/fetch only changed records.

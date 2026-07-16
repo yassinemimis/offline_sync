@@ -1,0 +1,25 @@
+name: offline_sync_workmanager
+description: >
+  Background sync scheduling for offline_sync_core via the `workmanager`
+  package — periodically drains the sync queue even while the app is
+  closed (Android) or suspended (iOS, best-effort).
+version: 0.0.1
+homepage: https://github.com/<org>/offline_sync
+repository: https://github.com/<org>/offline_sync
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  offline_sync_core:
+    path: ../offline_sync_core
+  workmanager: ^0.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^4.0.0
