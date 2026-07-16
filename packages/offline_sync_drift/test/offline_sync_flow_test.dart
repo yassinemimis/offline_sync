@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' hide isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:offline_sync_core/offline_sync_core.dart';
@@ -32,6 +33,17 @@ final userAdapter = SyncAdapter<User>(
 );
 
 void main() {
+  // These tests exercise the local queue/retry loop directly, not
+  // connectivity — Drift intentionally opens a fresh in-memory AppDatabase
+  // per test for isolation, which otherwise trips Drift's
+  // "opened multiple times" heuristic (meant to catch *accidental*
+  // duplicate opens of the same on-disk file, not this).
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
+
+  // OfflineSync is a static singleton; cancel any leftover subscription
+  // between tests so state doesn't leak across test cases.
+  tearDown(() => OfflineSync.dispose());
+
   test('save -> stored locally + queued -> sync drains the queue', () async {
     // In-memory DB: no filesystem, no device needed — runs anywhere.
     final db = AppDatabase.withExecutor(NativeDatabase.memory());
@@ -40,6 +52,9 @@ void main() {
     await OfflineSync.initialize(
       storage: storage,
       transport: const NoopSyncTransport(),
+      // Not testing connectivity here — and ConnectivityPlusChecker needs
+      // a real platform channel, unavailable in this test environment.
+      autoSync: false,
     );
     OfflineSync.register<User>(userAdapter);
 
@@ -78,6 +93,7 @@ void main() {
     await OfflineSync.initialize(
       storage: storage,
       transport: const _AlwaysFailsTransport(),
+      autoSync: false,
     );
     OfflineSync.register<User>(userAdapter);
 
@@ -87,15 +103,10 @@ void main() {
 
     await OfflineSync.sync();
 
-    // getPendingOperations(now: ...) defaults to "right now" if omitted,
-    // and this op's nextRetryAt is ~5s in the future (default
-    // RetryPolicy.baseDelay), so it correctly won't show up yet.
     final pendingRightNow = await storage.getPendingOperations();
     expect(pendingRightNow, isEmpty,
         reason: 'backoff should hide it until nextRetryAt passes');
 
-    // Query without the time filter (pass a far-future "now") to inspect
-    // the row itself.
     final scheduled = await storage.getPendingOperations(
       now: beforeCall.add(const Duration(days: 1)),
     );
@@ -118,13 +129,11 @@ void main() {
     await OfflineSync.initialize(
       storage: storage,
       transport: const _AlwaysFailsTransport(),
-      // Tiny delay so each failed operation becomes eligible again almost
-      // immediately -- lets the test call sync() repeatedly without
-      // actually waiting minutes for real backoff timers.
       retryPolicy: const RetryPolicy(
         baseDelay: Duration(microseconds: 1),
         maxAttempts: 2,
       ),
+      autoSync: false,
     );
     OfflineSync.register<User>(userAdapter);
 
@@ -132,9 +141,9 @@ void main() {
       User(id: 'u3', name: 'Karim', updatedAt: DateTime.now()),
     );
 
-    await OfflineSync.sync(); // attempt 1 -> failed, retryCount 1
+    await OfflineSync.sync();
     await Future<void>.delayed(const Duration(milliseconds: 1));
-    await OfflineSync.sync(); // attempt 2 -> exhausted, retryCount 2
+    await OfflineSync.sync();
 
     final farFuture = await storage.getPendingOperations(
       now: DateTime.now().add(const Duration(days: 1)),
@@ -151,6 +160,7 @@ void main() {
     await OfflineSync.initialize(
       storage: storage,
       transport: const _AlwaysRejectsTransport(),
+      autoSync: false,
     );
     OfflineSync.register<User>(userAdapter);
 
@@ -169,9 +179,6 @@ void main() {
   });
 }
 
-/// Simulates a server/network that always rejects the request — e.g. the
-/// device went offline again mid-sync, or the server returned a 5xx.
-/// Retriable: eligible for backoff and another attempt.
 class _AlwaysFailsTransport implements SyncTransport {
   const _AlwaysFailsTransport();
 
@@ -184,9 +191,6 @@ class _AlwaysFailsTransport implements SyncTransport {
   }
 }
 
-/// Simulates a server that actively rejects the request (e.g. a 422
-/// validation error) — not retriable, since resending identical bytes
-/// won't change the outcome.
 class _AlwaysRejectsTransport implements SyncTransport {
   const _AlwaysRejectsTransport();
 

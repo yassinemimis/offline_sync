@@ -30,9 +30,10 @@ class EntitiesTable extends Table {
   /// `deleted = true` are excluded from `getAllEntities` reads.
   BoolColumn get deleted => boolean().withDefault(const Constant(false))();
 
-  /// Bumped on every local write; used by the default conflict strategy
-  /// (Phase 2) to compare against the server's version.
-  IntColumn get version => integer().withDefault(const Constant(1))();
+ /// Bumped only by `LocalStorage.markSynced`, to "the version last
+/// confirmed with the server" — never on a plain local write (see
+/// `LocalStorage.saveEntity` docs). New/never-synced rows are `0`.
+IntColumn get version => integer().withDefault(const Constant(0))();
 
   @override
   Set<Column> get primaryKey => {entityType, entityId};

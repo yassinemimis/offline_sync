@@ -142,6 +142,27 @@ An operation whose `entityName` has no matching registered adapter is
 skipped for that call rather than crashing the whole sync — it's picked
 up again once the adapter is registered.
 
+### Checking queue status
+
+Two counters, easy to mix up — pick based on what you're building:
+
+| Method | Counts | Use for |
+|---|---|---|
+| `OfflineSync.pendingOperationsCount()` | Operations eligible to send **right now** — excludes `failed` rows still waiting out a `RetryPolicy` backoff window. | Driving sync logic itself (rarely needed directly — `sync()` already does this). |
+| `OfflineSync.totalQueuedOperationsCount()` | **Every** unsynced operation, including ones mid-backoff. | UI badges/counters — "3 changes not yet synced". This is almost always what you want to show a user. |
+
+A device that just went offline and had a failed send attempt will show
+`pendingOperationsCount() == 0` for the next few seconds (nothing is
+eligible to retry *yet*) while `totalQueuedOperationsCount() == 1` (the
+change is still unsynced). Showing the first number in a UI reads as "all
+synced" when it isn't — use `totalQueuedOperationsCount()` for anything
+user-facing.
+
+```dart
+final pending = await OfflineSync.totalQueuedOperationsCount();
+// e.g. show "3 changes pending" in an AppBar chip
+```
+
 ### Retries and backoff
 
 `RetryPolicy` controls how long `sync()` waits before retrying a
@@ -213,6 +234,7 @@ abstract class LocalStorage {
   Future<List<SyncOperation>> getPendingOperations({DateTime? now});
   Future<void> updateOperationStatus(String operationId, SyncOperationStatus status, {int? retryCount, DateTime? nextRetryAt});
   Future<void> removeOperation(String operationId);
+  Future<int> totalQueuedOperationsCount();
 }
 ```
 

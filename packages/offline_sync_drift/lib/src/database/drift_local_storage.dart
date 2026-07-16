@@ -230,4 +230,9 @@ class DriftLocalStorage implements LocalStorage {
           ..where((t) => t.id.equals(operationId)))
         .go();
   }
+  @override
+Future<int> totalQueuedOperationsCount() async {
+  final rows = await _db.select(_db.syncOperationsTable).get();
+  return rows.length;
+}
 }

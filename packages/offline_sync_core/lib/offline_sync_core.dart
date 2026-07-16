@@ -9,3 +9,5 @@ export 'src/engine/offline_sync.dart';
 export 'src/retry/retry_policy.dart';
 export 'src/transport/noop_sync_transport.dart';
 export 'src/conflict/conflict_resolver.dart';
+export 'src/connectivity/connectivity_checker.dart';
+export 'src/connectivity/connectivity_plus_checker.dart';

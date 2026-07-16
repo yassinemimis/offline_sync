@@ -11,70 +11,61 @@ The **Retry Strategy** determines what happens when an operation sent by the [Ne
 
 ## Default Behavior
 
-By default, Offline Sync uses an **exponential backoff** strategy: each retry waits longer than the previous one, up to a configurable maximum.
+Offline Sync uses a fixed **exponential backoff** strategy, configured via `RetryPolicy` when you call `OfflineSync.initialize()`: each retry waits longer than the previous one (`baseDelay × 2^(attempt − 1)`), capped at `maxDelay`, up to `maxAttempts` tries.
 
 ```dart
-OfflineSync.configure(
-  retry: RetryConfig(
-    strategy: RetryStrategy.exponentialBackoff,
-    maxAttempts: 5,
-    initialDelay: const Duration(seconds: 2),
-    maxDelay: const Duration(minutes: 5),
+await OfflineSync.initialize(
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(dio),
+  retryPolicy: const RetryPolicy(
+    baseDelay: Duration(seconds: 2),
+    maxDelay: Duration(minutes: 5),
+    maxAttempts: 3,
   ),
 );
 ```
 
-| Attempt | Delay (approx.) |
+With the config above:
+
+| Attempt | Delay before this attempt |
 |---------|-----------------|
-| 1       | 2s              |
-| 2       | 4s              |
-| 3       | 8s              |
-| 4       | 16s             |
-| 5       | 32s (capped by `maxDelay`) |
+| 1       | — (first attempt, no delay) |
+| 2       | 2s (`baseDelay × 2⁰`) |
+| 3       | 4s (`baseDelay × 2¹`) |
+
+After attempt 3 fails, the operation is marked `exhausted` — see **Giving Up** below. Raise `maxAttempts` and `maxDelay` for apps that expect long offline stretches (e.g. field data collection); the defaults suit apps that expect to reconnect quickly.
 
 ## What Gets Retried
 
 | Failure type                        | Retried? |
 |--------------------------------------|----------|
-| Network timeout                      | ✅        |
-| Connection lost                      | ✅        |
+| Network timeout / no connection      | ✅        |
 | Server error (5xx)                   | ✅        |
-| Rate limited (429)                   | ✅ (respects `Retry-After` if present) |
+| Rate limited (429)                   | ❌ — currently treated the same as any other 4xx (see note below) |
 | Validation error (4xx, non-conflict) | ❌        |
-| Conflict (409 / version mismatch)    | ❌ → handed to Conflict Resolution |
+| Conflict (409 / version mismatch)    | ❌ → handed to [Conflict Resolution](/docs/guides/conflict-resolution) instead of the retry path entirely |
+
+:::caution Known gap
+429 responses are not currently distinguished from other 4xx errors —
+`offline_sync_dio`'s transport classifies anything below 500 (other than
+409, which is treated as a conflict) as non-retriable. Proper `429`
+handling (retry, optionally honoring `Retry-After`) is tracked on the
+[Roadmap](/docs/roadmap) but not implemented yet. If your backend rate-limits
+aggressively, account for this until it lands.
+:::
 
 ## Giving Up
 
-Once `maxAttempts` is reached, the operation is marked as **failed** rather than being retried indefinitely. Failed operations remain visible in the queue so the app (or the user) can decide to retry manually or discard them.
+Once `maxAttempts` is reached, the operation is marked `exhausted` in the queue rather than retried indefinitely — it will **not** be picked up by future `sync()` calls automatically.
 
-```dart
-OfflineSync.queue.onOperationFailed.listen((op) {
-  print('Giving up on ${op.id} after ${op.attempts} attempts');
-});
-```
+There's currently no built-in callback for observing this (unlike conflicts, which have `onConflict` — see [Conflict Resolution](/docs/guides/conflict-resolution)). To detect exhausted operations today, inspect them via your configured [Storage Adapter](/docs/adapters/storage-adapters) directly. A dedicated stream/callback, and a way to manually re-queue or discard exhausted operations, is planned — see [Roadmap](/docs/roadmap).
 
 ## Custom Strategies
 
-You can implement your own retry policy by conforming to the retry contract:
-
-```dart
-class LinearRetry implements RetryStrategyContract {
-  @override
-  Duration delayFor(int attempt) => Duration(seconds: attempt * 3);
-
-  @override
-  bool shouldRetry(SyncFailure failure) => failure.isRecoverable;
-}
-```
-
-```dart
-OfflineSync.configure(
-  retry: RetryConfig.custom(LinearRetry()),
-);
-```
+`RetryPolicy` is currently a single, fixed exponential-backoff implementation — there is no pluggable strategy interface yet. If your app needs different retry math (e.g. linear backoff), that's not supported today; follow the [Roadmap](/docs/roadmap) or open a discussion if this is blocking you.
 
 ## Related
 
 - [Network Layer](/docs/guides/network-layer)
-- [Queue Engine](/docs/guides/queue-engine)
+- [Queue Engine](/docs/guides/queue-engine#reading-queue-status)
 - [Conflict Resolution](/docs/guides/conflict-resolution)
