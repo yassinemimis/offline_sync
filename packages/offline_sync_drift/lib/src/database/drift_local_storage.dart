@@ -96,9 +96,6 @@ class DriftLocalStorage implements LocalStorage {
           .getSingleOrNull();
       if (existing == null) return 0;
 
-      // Prefer the version the server actually reports; fall back to
-      // "server incremented by exactly one" only when the transport
-      // didn't capture one (see SyncTransportResult.success docs).
       final newVersion = serverVersion ?? existing.version + 1;
 
       await (_db.update(_db.entitiesTable)
@@ -191,20 +188,7 @@ class DriftLocalStorage implements LocalStorage {
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
         .get();
 
-    return rows
-        .map((row) => SyncOperation(
-              id: row.id,
-              entityName: row.entityType,
-              entityId: row.entityId,
-              type: row.type,
-              payload: jsonDecode(row.payloadJson) as Map<String, dynamic>,
-              createdAt: row.createdAt,
-              status: row.status,
-              retryCount: row.retryCount,
-              nextRetryAt: row.nextRetryAt,
-              localVersion: row.localVersion,
-            ))
-        .toList();
+    return rows.map(_operationFromRow).toList();
   }
 
   @override
@@ -230,9 +214,59 @@ class DriftLocalStorage implements LocalStorage {
           ..where((t) => t.id.equals(operationId)))
         .go();
   }
+
   @override
-Future<int> totalQueuedOperationsCount() async {
-  final rows = await _db.select(_db.syncOperationsTable).get();
-  return rows.length;
-}
+  Future<int> totalQueuedOperationsCount() async {
+    final rows = await _db.select(_db.syncOperationsTable).get();
+    return rows.length;
+  }
+
+  @override
+  Future<List<SyncOperation>> getOperationsForEntity({
+    required String entityName,
+    required String entityId,
+  }) async {
+    final rows = await (_db.select(_db.syncOperationsTable)
+          ..where((t) =>
+              t.entityType.equals(entityName) & t.entityId.equals(entityId))
+          ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
+        .get();
+
+    return rows.map(_operationFromRow).toList();
+  }
+
+  SyncOperation _operationFromRow(SyncOperationsTableData row) {
+    return SyncOperation(
+      id: row.id,
+      entityName: row.entityType,
+      entityId: row.entityId,
+      type: row.type,
+      payload: jsonDecode(row.payloadJson) as Map<String, dynamic>,
+      createdAt: row.createdAt,
+      status: row.status,
+      retryCount: row.retryCount,
+      nextRetryAt: row.nextRetryAt,
+      localVersion: row.localVersion,
+    );
+  }
+
+  // ---- Delta sync cursor ----
+
+  @override
+  Future<DateTime?> getSyncCursor(String entityName) async {
+    final row = await (_db.select(_db.syncCursorsTable)
+          ..where((t) => t.entityType.equals(entityName)))
+        .getSingleOrNull();
+    return row?.lastSyncedAt;
+  }
+
+  @override
+  Future<void> setSyncCursor(String entityName, DateTime cursor) async {
+    await _db.into(_db.syncCursorsTable).insertOnConflictUpdate(
+          SyncCursorsTableCompanion.insert(
+            entityType: entityName,
+            lastSyncedAt: cursor,
+          ),
+        );
+  }
 }

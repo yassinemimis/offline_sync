@@ -24,8 +24,9 @@ class AdapterRegistry {
     return adapter as SyncAdapter<T>;
   }
 
-  /// `null` if nothing is registered for [entityName] yet — [SyncRunner]
-  /// skips the operation for this pass rather than crashing; it's picked
-  /// up again next time [entityName] has a registered adapter.
   SyncAdapter? byEntityName(String entityName) => _byName[entityName];
+
+  /// Every registered adapter — used by `OfflineSync.sync()` to pull
+  /// changes for all entity types in one pass, not just push the queue.
+  Iterable<SyncAdapter> get all => _byName.values;
 }

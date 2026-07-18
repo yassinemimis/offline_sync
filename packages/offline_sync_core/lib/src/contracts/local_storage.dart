@@ -37,15 +37,15 @@ abstract class LocalStorage {
     required String entityId,
   });
 
-/// Called after a create/update operation is confirmed synced. Uses
-/// [serverVersion] as the new baseline if the transport captured one
-/// from the response; otherwise falls back to incrementing by one.
-/// Returns the entity's new version.
-Future<int> markSynced({
-  required String entityName,
-  required String entityId,
-  int? serverVersion,
-});
+  /// Called after a create/update operation is confirmed synced. Uses
+  /// [serverVersion] as the new baseline if the transport captured one
+  /// from the response; otherwise falls back to incrementing by one.
+  /// Returns the entity's new version.
+  Future<int> markSynced({
+    required String entityName,
+    required String entityId,
+    int? serverVersion,
+  });
 
   /// Writes back the result of conflict resolution: [data] becomes the
   /// row's content, [version] becomes its new baseline (the server's
@@ -84,9 +84,37 @@ Future<int> markSynced({
   Future<void> removeOperation(String operationId);
 
   /// Every operation still in the queue, regardless of whether it's
-/// eligible to be attempted right now — unlike [getPendingOperations],
-/// this includes `failed` rows still waiting out their backoff window.
-/// Meant for UI display ("3 changes not yet synced"), not for driving
-/// the sync loop itself.
-Future<int> totalQueuedOperationsCount();
+  /// eligible to be attempted right now — unlike [getPendingOperations],
+  /// this includes `failed` rows still waiting out their backoff window.
+  /// Meant for UI display ("3 changes not yet synced"), not for driving
+  /// the sync loop itself.
+  Future<int> totalQueuedOperationsCount();
+
+  /// Every queued operation for one specific entity, **regardless of
+  /// status** (including `failed` rows mid-backoff, unlike
+  /// [getPendingOperations]).
+  ///
+  /// Used by delta-pull (Phase 7) to detect a genuine conflict: if this
+  /// returns anything non-empty for a record the server reports as
+  /// changed, there's an unsynced local change competing with it — see
+  /// `DeltaPuller`. Deliberately scoped to one entity rather than
+  /// reusing [getPendingOperations] filtered in Dart, so a storage
+  /// adapter can serve it with an indexed query instead of a full scan.
+  Future<List<SyncOperation>> getOperationsForEntity({
+    required String entityName,
+    required String entityId,
+  });
+
+  // ---- Delta sync cursor ----
+
+  /// The watermark to resume delta-pulling [entityName] from — the
+  /// `fetchedAt` of the last successful `DeltaSyncTransport.fetchChanges`
+  /// call for it. `null` if this entity type has never been pulled.
+  Future<DateTime?> getSyncCursor(String entityName);
+
+  /// Persists the watermark to resume from on the next pull for
+  /// [entityName]. Call only after every record in that fetch has been
+  /// fully reconciled — a cursor advanced before reconciliation
+  /// completes risks silently skipping records on a retry.
+  Future<void> setSyncCursor(String entityName, DateTime cursor);
 }

@@ -44,6 +44,30 @@ Future<void> main() async {
     transport: DioSyncTransport(dio),
     retryPolicy:
         const RetryPolicy(baseDelay: Duration(seconds: 2), maxAttempts: 3),
+
+    // ── Conflict testing: swap ONE of these four, full-restart between
+    // each test. Only one should be active (uncommented) at a time. ──
+
+    // 1) Server Wins
+    // conflictResolver: const ConflictResolver.serverWins(),
+
+    // 2) Client Wins
+    // conflictResolver: const ConflictResolver.clientWins(),
+
+    // 3) Last Write Wins (default — same as omitting this param entirely)
+    conflictResolver: const ConflictResolver.lastWriteWins(),
+
+    // 4) Manual — uncomment this block INSTEAD of the line above,
+    // comment the line above out when testing this one.
+    // conflictResolver: ConflictResolver.manual((conflict) {
+    //   debugPrint(
+    //     ' Manual resolver called for ${conflict.entityName}/${conflict.entityId}\n'
+    //     '   local : v${conflict.localVersion}  "${conflict.localData['title']}"  (${conflict.localUpdatedAt})\n'
+    //     '   server: v${conflict.serverVersion}  "${conflict.serverData['title']}"  (${conflict.serverUpdatedAt})',
+    //   );
+    //   return conflict.localData; // swap to conflict.serverData to test the other direction
+    // }),
+
     onConflict: (conflict, winningData) {
       debugPrint(
         '⚠ Conflict resolved for ${conflict.entityName}/${conflict.entityId}: '
