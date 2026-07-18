@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:offline_sync_core/offline_sync_core.dart';
+import 'package:offline_sync_workmanager/offline_sync_workmanager.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/todo.dart';
@@ -77,30 +78,30 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
-Future<void> _createTodo() async {
-  final todo = Todo(
-    id: uuid.v4(),
-    title: "Todo ${DateTime.now().millisecondsSinceEpoch}",
-    completed: false,
-    updatedAt: DateTime.now(),
-  );
+  Future<void> _createTodo() async {
+    final todo = Todo(
+      id: uuid.v4(),
+      title: "Todo ${DateTime.now().millisecondsSinceEpoch}",
+      completed: false,
+      updatedAt: DateTime.now(),
+    );
 
-  await OfflineSync.save(todo);
-  await _refresh();
+    await OfflineSync.save(todo);
+    await _refresh();
 
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text("Todo saved locally")),
-  );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Todo saved locally")),
+    );
 
-  // save() triggers an opportunistic sync in the background
-  // (fire-and-forget) — it hasn't necessarily finished by the time we
-  // get here. Refresh again shortly after so "pending" reflects the
-  // outcome without needing a manual "Sync now" press.
-  Future<void>.delayed(const Duration(seconds: 1), () {
-    if (mounted) _refresh();
-  });
-}
+    // save() triggers an opportunistic sync in the background
+    // (fire-and-forget) — it hasn't necessarily finished by the time we
+    // get here. Refresh again shortly after so "pending" reflects the
+    // outcome without needing a manual "Sync now" press.
+    Future<void>.delayed(const Duration(seconds: 1), () {
+      if (mounted) _refresh();
+    });
+  }
 
   Future<void> _sync() async {
     setState(() => _syncing = true);
@@ -124,12 +125,59 @@ Future<void> _createTodo() async {
     );
   }
 
+  /// Schedules a one-off WorkManager task, meant to be pressed while
+  /// *already offline* — so the network constraint genuinely isn't met
+  /// yet, and firing on reconnect actually proves something (unlike
+  /// calling this from main(), which runs while still online and fires
+  /// almost immediately, defeating the point).
+  Future<void> _scheduleBackgroundTest() async {
+    await BackgroundSync.scheduleOneOffTest();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('✅ Background test scheduled — waiting for connectivity'),
+      ),
+    );
+  }
+
+  Future<void> _showBackgroundSyncLog() async {
+    final attempts = await BackgroundSync.recentAttempts();
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Background Sync Log'),
+        content: SingleChildScrollView(
+          child: Text(
+            attempts.isEmpty
+                ? 'No background sync attempts yet.'
+                : attempts.reversed.map((a) => a.toString()).join('\n\n'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await BackgroundSync.recentAttempts(); // no-op read, keeps API symmetric
+              if (context.mounted) Navigator.of(context).pop();
+            },
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Offline Sync Example"),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.bug_report),
+            tooltip: 'Background Sync Log',
+            onPressed: _showBackgroundSyncLog,
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 6),
             child: Center(
@@ -174,14 +222,15 @@ Future<void> _createTodo() async {
             ),
           Padding(
             padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 12,
+              runSpacing: 8,
               children: [
                 ElevatedButton(
                   onPressed: _createTodo,
                   child: const Text("Create Todo"),
                 ),
-                const SizedBox(width: 16),
                 ElevatedButton(
                   onPressed: _syncing ? null : _sync,
                   child: _syncing
@@ -191,6 +240,10 @@ Future<void> _createTodo() async {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Text("Sync now"),
+                ),
+                OutlinedButton(
+                  onPressed: _scheduleBackgroundTest,
+                  child: const Text("Schedule BG Test"),
                 ),
               ],
             ),
@@ -213,7 +266,7 @@ Future<void> _createTodo() async {
                             ),
                             title: Text(todo.title),
                             subtitle: Text(
-                              'id: ${todo.id}\nupdated: ${todo.updatedAt}',
+                              'ID: ${todo.id}\nUpdated: ${todo.updatedAt}',
                             ),
                             isThreeLine: true,
                           );

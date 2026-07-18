@@ -1,11 +1,22 @@
 ---
 sidebar_position: 1
 ---
+
 # Architecture
 
-Offline Sync follows a modular and extensible architecture designed around the principles of **Offline-First**, **Separation of Concerns**, and **Pluggability**.
+Offline Sync follows a modular and extensible architecture designed
+around the principles of **Offline-First**, **Separation of Concerns**,
+and **Pluggability**.
 
-The framework separates synchronization responsibilities into independent modules, allowing each component to evolve without affecting the others.
+The framework separates synchronization responsibilities into
+independent modules, allowing each component to evolve without
+affecting the others.
+
+:::info Status
+This page describes the target architecture. Modules marked ✅ are
+implemented and tested today; modules marked ⏳ are planned but not
+built yet. See the [project roadmap](/) for exact phase status.
+:::
 
 ---
 
@@ -22,18 +33,24 @@ The framework separates synchronization responsibilities into independent module
  └───────────────────────────────────────────────────────────┘
         │          │          │          │          │
         ▼          ▼          ▼          ▼          ▼
-  Local Storage   Queue   Network   Sync Engine   Logger
+  Local Storage   Queue   Network   Sync Engine   Connectivity
+     (✅)          (✅)      (✅)        (✅)          (✅)
         │                      │
         ▼                      ▼
- Database Adapter      Conflict Resolver
+ Database Adapter      Conflict Resolver (✅)
         │                      │
         └──────────────┬───────┘
-                       ▼
-              Background Worker
-                       │
-                       ▼
+                        ▼
+              Background Worker (✅)
+                        │
+                        ▼
                Remote Backend API
 ```
+
+Every box above exists today — this isn't aspirational. The one thing
+missing from the diagram entirely is a dedicated **Logger** module
+(structured observability beyond `BackgroundSync`'s built-in attempt
+log) — still ⏳ planned.
 
 ---
 
@@ -43,9 +60,9 @@ Offline Sync is built around five fundamental principles.
 
 ## 1. Local First
 
-Every operation is executed locally before communicating with the server.
-
-The local database is always the primary source of truth during execution.
+Every operation is executed locally before communicating with the
+server. The local database is always the primary source of truth during
+execution.
 
 ```
 User Action
@@ -54,13 +71,17 @@ User Action
 Local Database
 ```
 
+`OfflineSync.save()` never blocks on the network — it returns as soon as
+the local write succeeds. ✅ implemented since Phase 1.
+
 ---
 
 ## 2. Queue-Based Synchronization
 
-Operations are never sent directly to the backend.
-
-Instead, they are transformed into synchronization jobs.
+Operations are never sent directly to the backend. Instead, they're
+transformed into synchronization jobs — an explicit `create`/`update`/
+`delete` **operation**, not just a data snapshot, so a delete reaches the
+server as a real `DELETE` rather than a row silently disappearing.
 
 ```
 Create User
@@ -74,15 +95,17 @@ Queue
 Sync Later
 ```
 
-This guarantees that no operation is lost.
+This guarantees that no operation is lost. ✅ implemented since Phase 1.
 
 ---
 
 ## 3. Eventual Consistency
 
-The local database and the remote server may temporarily differ.
-
-The synchronization engine ensures that both eventually converge toward the same state.
+The local database and the remote server may temporarily differ. The
+synchronization engine ensures both eventually converge toward the same
+state — using an optimistic-concurrency `version` per entity to detect
+divergence, and a pluggable conflict strategy (Server Wins / Client Wins
+/ Last-Write-Wins / Manual) to resolve it. ✅ implemented since Phase 4.
 
 ```
 Device A
@@ -110,39 +133,33 @@ Device B
 
 Each subsystem has a single responsibility.
 
-| Module | Responsibility |
-|---------|----------------|
-| Core | Public API |
-| Storage | Local persistence |
-| Queue | Pending operations |
-| Network | HTTP communication |
-| Sync Engine | Orchestrates synchronization |
-| Conflict Resolver | Handles conflicts |
-| Retry Engine | Retries failed requests |
-| Logger | Observability |
-| Background Worker | Background synchronization |
+| Module | Responsibility | Status |
+|---------|----------------|--------|
+| Core | Public API, engine, contracts | ✅ |
+| Storage | Local persistence (`offline_sync_drift`) | ✅ |
+| Queue | Pending operations | ✅ |
+| Network | HTTP communication (`offline_sync_dio`) | ✅ |
+| Sync Engine | Orchestrates synchronization | ✅ |
+| Retry Engine | Exponential backoff, bounded retry budget | ✅ |
+| Conflict Resolver | Handles conflicts | ✅ |
+| Connectivity | Detects reconnection, triggers sync | ✅ |
+| Background Worker | Sync while the app is closed (`offline_sync_workmanager`) | ✅ |
+| Logger | Structured observability | ⏳ |
 
 ---
 
 ## 5. Extensibility
 
-Every component can be replaced.
+Every component can be replaced without changing the framework's public
+API — `core` depends only on interfaces (`LocalStorage`, `SyncTransport`,
+`ConnectivityChecker`), never on a concrete implementation. Developers
+may use:
 
-Developers may use:
-
-- Drift
-- SQLite
-- Hive
-- Isar
+- Drift ✅ (built) — Hive ⏳ · Isar ⏳ (planned, same contract)
 
 or
 
-- Dio
-- GraphQL
-- Firebase
-- Supabase
-
-without changing the framework API.
+- Dio ✅ (built) — GraphQL ⏳ · Firebase ⏳ · Supabase ⏳ (planned, same contract)
 
 ---
 
@@ -153,36 +170,41 @@ offline_sync/
 
 packages/
 
-├── offline_sync_core
+├── offline_sync_core          ✅ built
 │
-├── offline_sync_drift
+├── offline_sync_drift         ✅ built
 │
-├── offline_sync_dio
+├── offline_sync_dio           ✅ built
 │
-├── offline_sync_hive
+├── offline_sync_workmanager   ✅ built
 │
-├── offline_sync_isar
+├── offline_sync_hive          ⏳ planned
 │
-├── offline_sync_graphql
+├── offline_sync_isar          ⏳ planned
 │
-├── offline_sync_firebase
+├── offline_sync_graphql       ⏳ planned
 │
-├── offline_sync_supabase
+├── offline_sync_firebase      ⏳ planned
 │
-├── offline_sync_cli
+├── offline_sync_supabase      ⏳ planned
 │
-├── offline_sync_devtools
+├── offline_sync_cli           ⏳ planned
 │
-├── offline_sync_ui
+├── offline_sync_devtools      ⏳ planned
 │
-└── offline_sync_example
+└── offline_sync_ui            ⏳ planned
+
+offline_sync_example/
+└── flutter_app                ✅ built (demo app, outside packages/)
 ```
 
 ---
 
 # Request Lifecycle
 
-Every operation follows exactly the same lifecycle.
+Every write follows the same lifecycle. There are three separate
+triggers for the "sync" half — not just one — each covering a different
+scenario:
 
 ```
 User
@@ -193,42 +215,56 @@ OfflineSync.save()
 
 ↓
 
-Serialize Model
+Serialize Model (SyncAdapter.toJson)
 
 ↓
 
-Local Database
+Local Database (write immediately)
 
 ↓
 
-Queue
+Queue (enqueue create/update/delete)
 
 ↓
 
-Return Success
+Return Success   ◄── the user never waits past this point
+
+↓
+   ┌─────────────────────────────────────────────┐
+   │  Three independent sync triggers:            │
+   │                                                │
+   │  1. Opportunistic — save() itself makes one   │
+   │     immediate attempt, fire-and-forget         │
+   │  2. Connectivity — auto-sync fires the moment  │
+   │     the device reconnects                      │
+   │  3. Background — periodic sync even while      │
+   │     the app is fully closed (WorkManager)       │
+   └─────────────────────────────────────────────┘
 
 ↓
 
-Wait for Connectivity
+Sync Engine (SyncRunner)
 
 ↓
 
-Sync Engine
+HTTP Request (SyncTransport)
 
 ↓
-
-HTTP Request
-
-↓
-
-Success
-
-↓
-
-Remove Queue Entry
+    ┌──────────┬───────────────┬────────────────┐
+    ▼          ▼               ▼
+ Success    Retriable       Conflict
+    │        Failure       (409, version
+    │           │           mismatch)
+    ▼           ▼               ▼
+ Remove      Backoff +      ConflictResolver
+ Queue       Retry, up      picks a winner
+ Entry       to a budget
+             then
+             `exhausted`
 ```
 
-The user never waits for the server.
+The user never waits for the server, no matter which of the three
+triggers eventually delivers the write.
 
 ---
 
@@ -247,15 +283,15 @@ Queue Operation
 
 ↓
 
-Internet Available
+Internet Available  ◄── via connectivity listener, or the periodic
+│                        background task, whichever notices first
+▼
+
+Retry Pending Jobs (RetryPolicy: exponential backoff, bounded attempts)
 
 ↓
 
-Retry Pending Jobs
-
-↓
-
-Resolve Conflicts
+Resolve Conflicts (if the server reports a version mismatch)
 
 ↓
 
@@ -270,79 +306,121 @@ Synchronization Completed
 
 # Layer Responsibilities
 
-## Public API
+## Public API — ✅ built
 
-Exposes a clean API for developers.
+Exposes a clean, static API for developers.
 
 ```dart
+await OfflineSync.initialize(
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(dio),
+);
+OfflineSync.register<User>(userAdapter);
 await OfflineSync.save(user);
 ```
 
 ---
 
-## Storage Layer
+## Storage Layer — ✅ built
 
 Responsible for:
 
 - Local persistence
-- Metadata
+- Metadata (`isSynced`, `deleted`, `version`)
 - Transactions
-- Serialization
+- Serialization (JSON snapshots via `SyncAdapter`)
 
 ---
 
-## Queue Layer
+## Queue Layer — ✅ built
 
 Responsible for:
 
 - Pending operations
-- Ordering
-- Retry counters
-- Synchronization status
+- Ordering (oldest first)
+- Retry counters and scheduled retry time (`nextRetryAt`)
+- Synchronization status (`pending` / `failed` / `exhausted` / `synced`)
 
 ---
 
-## Network Layer
+## Network Layer — ✅ built
 
 Responsible for:
 
-- HTTP requests
-- Authentication
-- Serialization
-- Timeouts
+- HTTP requests (verb mapping per operation type)
+- Serialization of the outgoing payload
+- Distinguishing retriable failures from conflicts from permanent
+  rejections
+
+Authentication, custom headers, and timeouts are configured on the
+`Dio`/HTTP client instance you provide — this layer has no opinion on
+them.
 
 ---
 
-## Synchronization Engine
+## Synchronization Engine — ✅ built
 
 Responsible for:
 
 - Uploading changes
-- Downloading updates
-- Conflict detection
+- Conflict detection (via `SyncTransportResult.conflict`)
 - Retry orchestration
+- De-duplicating concurrent sync attempts
+
+Downloading updates the server made independently (not in response to a
+client write) — a "pull" or delta-sync mechanism — is ⏳ planned, not yet
+built.
 
 ---
 
-## Conflict Resolver
+## Conflict Resolver — ✅ built
 
-Implements different conflict strategies.
+Implements different conflict strategies:
 
 - Server Wins
 - Client Wins
-- Last Update Wins
-- Manual Resolution
+- Last Update Wins *(default)*
+- Manual Resolution (an app-supplied callback, may await user input)
 
 ---
 
-## Logger
+## Connectivity Layer — ✅ built
 
-Records synchronization events for debugging and monitoring.
+Detects when the device regains a network path and triggers a sync
+automatically — including once at startup if already online. Pluggable,
+so it can be backed by something other than `connectivity_plus` if
+needed.
+
+---
+
+## Background Worker — ✅ built
+
+Runs the sync engine periodically via `WorkManager`, even while the app
+is fully closed. Runs in a separate isolate — see
+[Background Sync](./background-sync.mdx) for what that means in
+practice.
+
+---
+
+## Logger — ⏳ planned
+
+Structured, queryable synchronization event history, beyond what
+`BackgroundSync.recentAttempts()` currently provides for background runs
+specifically.
 
 ---
 
 # Why This Architecture?
 
-Instead of combining multiple unrelated libraries manually, Offline Sync provides a unified synchronization layer that coordinates local storage, networking, retries, conflict resolution, and background execution through a single, consistent API.
+Instead of combining multiple unrelated libraries manually, Offline Sync
+provides a unified synchronization layer that coordinates local storage,
+networking, retries, conflict resolution, connectivity detection, and
+background execution through a single, consistent API.
 
-This architecture keeps business logic independent from synchronization logic, making applications easier to build, maintain, and scale.
+This architecture keeps business logic independent from synchronization
+logic, making applications easier to build, maintain, and scale.
+
+For the reasoning *behind* each of these decisions — not just what was
+built, but why it was built this way — see the
+[full decisions log](https://github.com/yassinemimis/offline_sync/blob/main/ARCHITECTURE.md) (or `ARCHITECTURE.md`
+in the repository root).

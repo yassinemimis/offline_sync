@@ -4,7 +4,7 @@ import 'package:offline_sync_core/offline_sync_core.dart';
 import 'package:offline_sync_dio/offline_sync_dio.dart';
 import 'package:offline_sync_drift/offline_sync_drift.dart';
 import 'package:offline_sync_workmanager/offline_sync_workmanager.dart';
-import 'package:workmanager/workmanager.dart';
+
 import 'pages/home_page.dart';
 import 'sync/todo_adapter.dart';
 
@@ -14,6 +14,10 @@ const _apiBaseUrl = "http://10.0.2.2:3000";
 /// Must be top-level (or static) and annotated exactly like this, or
 /// release builds will silently tree-shake it away and background sync
 /// will just never fire, with no error anywhere.
+///
+/// No manual logging needed here anymore — runBackgroundSyncTask records
+/// success/failure/timeout automatically (see BackgroundSync.recentAttempts()
+/// in home_page.dart).
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   runBackgroundSyncTask(() async {
@@ -51,14 +55,14 @@ Future<void> main() async {
   );
   OfflineSync.register(todoAdapter);
 
-  // Phase 6: also sync periodically while the app is closed.
+  // Phase 6: also sync periodically while the app is closed. Registering
+  // a one-off *test* task no longer happens here — main() runs at app
+  // launch while the device is typically still online, so the task would
+  // fire almost immediately and defeat the point of testing "while
+  // offline, then reconnect". Use the "Schedule BG Test" button in the
+  // UI instead, timed deliberately while offline.
   await BackgroundSync.initialize(callbackDispatcher: callbackDispatcher);
 
-  await Workmanager().registerOneOffTask(
-    'test-one-off',
-    kOfflineSyncTaskName,
-    constraints: Constraints(networkType: NetworkType.connected),
-  );
   runApp(const MyApp());
 }
 

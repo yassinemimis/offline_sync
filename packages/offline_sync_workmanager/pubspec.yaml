@@ -18,6 +18,7 @@ dependencies:
   offline_sync_core:
     path: ../offline_sync_core
   workmanager: ^0.6.0
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:
