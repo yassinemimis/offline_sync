@@ -86,6 +86,7 @@ url: 'https://yassinemimis.github.io',
           label: 'Tutorial',
         },
         { to: '/blog', label: 'Blog', position: 'left' },
+        { to: '/about', label: 'Developer', position: 'left' },
         {
           href: 'https://github.com/yassinemimis/offline_sync',
           label: 'GitHub',

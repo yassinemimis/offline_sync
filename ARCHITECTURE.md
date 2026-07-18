@@ -1,16 +1,15 @@
-# Architecture Decisions — Phase 0
+# Architecture Decisions
 
-This document freezes the foundational decisions before any real
-implementation starts. Each one is expensive to reverse once other modules
-depend on it, so they are made explicit and justified here rather than
-implied by code.
+This document records the foundational decisions behind the project, in
+the order they were made. Each one is expensive to reverse once other
+modules depend on it, so they're made explicit and justified here rather
+than left implied by code.
 
 ## 1. Default storage engine: Drift (not Isar / Hive)
 
 **Decision:** `offline_sync_drift` is the reference/default adapter that
 `offline_sync_core` is developed and tested against first. Isar and Hive
-become alternative adapters later (Phase 5), behind the same storage
-contract.
+can become alternative adapters later, behind the same storage contract.
 
 **Why:**
 - The Queue is a relational problem at heart: ordered reads
@@ -22,7 +21,7 @@ contract.
   (reactive UI) out of the box — all needed for a sync engine that must
   never lose a write.
 - Drift works over `sqlite3` via FFI, which also runs in background
-  isolates — required later for the `background` module (WorkManager
+  isolates — required by the `background` module (Phase 6, WorkManager
   sync without the app open).
 - Isar's long-term maintenance trajectory has been uncertain; building
   the *reference* implementation on it is a risk we don't need to take
@@ -51,9 +50,9 @@ implement a `Syncable` interface or extend a base class.
   just a plain object, easy to construct with fakes.
 
 **Trade-off accepted:** slightly more boilerplate than a single
-annotation. We intentionally defer `@SyncModel()` code-generation sugar
-to a later phase (`offline_sync_cli`) — ship the manual API first,
-generate it later once the shape is proven and stable.
+annotation. `@SyncModel()` code-generation sugar (`offline_sync_cli`) is
+deliberately deferred — ship the manual API first, generate it later
+once the shape is proven and stable.
 
 ## 3. Monorepo from day one (melos)
 
@@ -65,16 +64,19 @@ under `packages/`:
 offline_sync/
 ├── melos.yaml
 └── packages/
-    ├── offline_sync_core/
-    ├── offline_sync_drift/
-    └── offline_sync_example/
+    ├── offline_sync_core/          # storage-agnostic contracts + engine
+    ├── offline_sync_drift/         # SQLite/Drift storage adapter
+    ├── offline_sync_dio/           # Dio-based network transport
+    └── offline_sync_workmanager/   # background sync scheduling
+offline_sync_example/
+└── flutter_app/                    # demo app, deliberately outside packages/
 ```
 
 **Why:**
 - The long-term plan (per the product vision) is many independent
-  packages (`_hive`, `_isar`, `_dio`, `_graphql`, `_firebase`,
-  `_supabase`, `_devtools`, `_cli`, `_ui`). Splitting a single package
-  into a monorepo later is far more expensive than starting with one.
+  packages (`_hive`, `_isar`, `_graphql`, `_firebase`, `_supabase`,
+  `_devtools`, `_cli`, `_ui`). Splitting a single package into a
+  monorepo later is far more expensive than starting with one.
 - `melos bootstrap` gives correct local `path:` dependency wiring
   between `core` and adapters during development, without needing
   published versions.
@@ -100,13 +102,168 @@ step of `OfflineSync.delete()`. It marks `deleted = true` and enqueues
 a `delete` operation; hard deletion (row removal) only happens after
 the server acknowledges the delete.
 
-**Why:** already covered in the product doc — the server must receive
-an explicit `DELETE`, not silently stop seeing a row.
+**Why:** the server must receive an explicit `DELETE`, not silently
+stop seeing a row.
+
+## 6. Network transport: adapter pattern, same as storage
+
+**Decision:** `sync()` depends only on a `SyncTransport` interface
+(`Future<SyncTransportResult> send(SyncOperation, SyncAdapter)`), defined
+in `core`. `offline_sync_dio` is the reference/default implementation,
+mirroring how `offline_sync_drift` relates to `LocalStorage` (decision
+#1). `offline_sync_core` has no `dio`/`http` dependency.
+
+**Why:**
+- Same reasoning as decision #1, applied to the network side: the plan
+  is multiple transports (`_dio`, `_graphql`, `_firebase`, `_supabase`).
+  If `core` imported `dio` directly, every one of those would drag in an
+  unused HTTP client dependency.
+- Testability: a `NoopSyncTransport` (always succeeds) or a hand-rolled
+  fake transport is enough to unit-test the full local write → queue →
+  drain loop and the failure path, without a real HTTP client or server
+  anywhere in the test.
+- **Verb mapping is the transport's job, not core's:** `core` only knows
+  `SyncOperationType` (`create`/`update`/`delete`); it never decides
+  POST/PUT/DELETE, GraphQL mutation names, or Firestore calls — that
+  belongs entirely to the concrete transport, since it varies per
+  backend style.
+
+## 7. Retry: exponential backoff with a bounded budget, not infinite retries
+
+**Decision:** `SyncTransportResult` distinguishes `retriable` failures
+(timeout, 5xx, no connection) from non-retriable ones (4xx). A
+`RetryPolicy` (`baseDelay`, `maxDelay`, `maxAttempts`) governs both the
+backoff delay (`nextRetryAt`, stored per operation) and a hard ceiling on
+attempts. Once exhausted — either the budget runs out or the failure was
+non-retriable — the operation is marked `SyncOperationStatus.exhausted`
+and is no longer retried automatically.
+
+**Why:**
+- Retrying a validation error (4xx) forever wastes battery/data for an
+  outcome that will never change without a code fix on one side or the
+  other.
+- An unbounded retriable failure (e.g. server down for days) must not
+  retry *forever* either — `exhausted` gives the app a clear, queryable
+  state to surface to the user or a developer, instead of a queue that
+  silently grows.
+- `RetryPolicy` is injected at `initialize()`, not hardcoded, because
+  "how patient to be" is an app-specific judgment call (a field
+  data-collection app expecting hours offline needs a very different
+  policy than a chat app).
+
+## 8. Conflict resolution: strategy-based, driven by optimistic concurrency
+
+**Decision:** every entity carries a `version` — "the version last
+confirmed with the server," bumped only by `LocalStorage.markSynced`,
+never by a plain local write. Each queued operation remembers the
+version it was built against (`SyncOperation.localVersion`). A transport
+reports a version mismatch as `SyncTransportResult.conflict(serverData,
+serverVersion)` (HTTP 409 by REST convention). `core` hands the resulting
+`SyncConflict` to a pluggable `ConflictResolver` — built-in strategies:
+Server Wins, Client Wins, Last-Write-Wins (default), and Manual (an
+app-supplied callback, which may `await` user input).
+
+**Why:**
+- `version`, not just `updatedAt`, is what makes conflict *detection*
+  possible in the first place — comparing timestamps alone can't tell
+  the client and server apart from a clock skew or a legitimately
+  concurrent edit; an incrementing counter the server owns can.
+- Versioning a local write would break the whole scheme: the client
+  would be claiming a baseline the server never acknowledged. `version`
+  only ever moves forward via server confirmation.
+- Delete conflicts are handled as their own case, not folded into the
+  same code path as create/update conflicts — resolving "the record you
+  tried to delete changed on the server" by treating the (empty) delete
+  payload as competing *data* to merge doesn't make sense.
+
+## 9. Connectivity: adapter pattern, and *not* automatically on every save()
+
+**Decision:** `ConnectivityChecker` (default: `ConnectivityPlusChecker`,
+wrapping `connectivity_plus`) is injected the same way as storage and
+transport. `OfflineSync.initialize(autoSync: true)` (the default)
+subscribes once for the app's lifetime and calls `sync()` whenever
+connectivity is restored — including once at startup if already online,
+since a connectivity *change* event never fires for a state that hasn't
+changed since launch.
+
+Separately, `save()` also makes one **opportunistic** attempt to sync
+immediately after enqueuing (fire-and-forget, de-duplicated against any
+in-flight `sync()` via the same mechanism `SyncRunner` uses for
+concurrent calls) — so the UI doesn't have to wait for a connectivity
+*event* that may be seconds away, or manually wire a "try now" button,
+to get a fast round-trip when the device is already online.
+
+**Why:**
+- "Connected" here means the OS reports an active network interface, not
+  verified reachability — checking real reachability adds latency and
+  false negatives for networks that block probing, for little benefit:
+  if the interface turns out to be a dead end, `sync()` simply fails and
+  Retry (decision #7) takes over.
+- Auto-sync-on-save and connectivity-triggered auto-sync are
+  complementary, not redundant: one covers "just came back online after
+  a while", the other covers "already online, don't make the user wait".
+
+## 10. Background sync: a full re-initialization boundary, not shared state
+
+**Decision:** `offline_sync_workmanager` wraps `workmanager`. Critically,
+the callback it schedules (`callbackDispatcher`, `@pragma('vm:entry-point')`)
+runs in a **separate isolate that shares no memory with the running
+app** — `OfflineSync`'s static state from the main isolate simply does
+not exist there. The app-provided callback must fully rebuild whatever
+`OfflineSync.initialize()` needs (same on-disk storage, a transport,
+registered adapters) from scratch, every single time it fires.
+`offline_sync_workmanager` cannot do this rebuild generically — only the
+app knows its own adapters/endpoints/auth.
+
+Every attempt is logged automatically (`BackgroundSyncLog`, backed by
+`shared_preferences`, survivable across isolate boundaries) with a
+bounded `timeout` around the app's sync call, so a hung request reports
+as `timeout` instead of leaving the WorkManager job — and the developer
+— waiting indefinitely with no signal.
+
+**Why:**
+- This isolate boundary isn't an implementation detail to hide; it's the
+  single most consequential fact about this module, and getting it wrong
+  produces confusing, silent failures (see "Lessons learned" below) —
+  the API and its docs are built to make the constraint visible rather
+  than paper over it.
+- Built-in logging exists because building this by hand, per app, turned
+  out to be easy to get subtly wrong (see below) — every consumer of
+  this package needs the same answer to "did it actually run", so it
+  belongs in the package, not re-invented per project.
+
+### Lessons learned validating this module (kept for future contributors)
+
+- **Debug-mode tooling kills background work.** `flutter run` (debug or
+  even `--release`, as long as it's still attached to the run daemon)
+  cancels any in-flight `WorkManager` task the moment the tooling
+  disconnects from the device. A background task that appears to "just
+  get cancelled" the instant you stop the app is not a bug in this
+  package — it's the debugger tearing down the isolate. Real validation
+  requires `flutter build apk` + `adb install`, launched from the
+  device's app drawer, with no `flutter run`/debugger attached at all.
+- **A periodic task's `frequency` is a floor, not a promise.** Android
+  enforces a 15-minute minimum and batches execution around device
+  state (battery, Doze); "reconnected but nothing happened for 10
+  minutes" is expected, not broken. `registerOneOffTask` exists
+  specifically to get a fast, deterministic signal during development —
+  it is not itself Phase 6's deliverable.
+- **A one-off test task must be scheduled while the constraint is
+  genuinely unmet.** Registering it from `main()` fires almost
+  immediately if the device is online at launch, which proves nothing
+  about "syncs after reconnecting." It has to be scheduled — by a
+  dedicated UI action, deliberately — while already offline.
+- **"WorkManager reports SUCCESS" only means the callback didn't
+  throw.** `SyncRunner` intentionally swallows per-operation errors so
+  one bad operation can't take down the rest of the queue (see
+  `sync_runner.dart`) — which means a background run can "succeed"
+  from WorkManager's point of view while every send inside it failed.
+  Don't trust the OS-level result alone; trust `BackgroundSyncLog`,
+  which records what `OfflineSync.sync()` actually did.
 
 ---
 
-**Status:** these five decisions are considered locked for Phase 1.
-Anything not listed here (retry strategy details, conflict resolution
-algorithm, compression, encryption) is deliberately left open — it
-belongs to later phases and shouldn't block starting `database` +
-`queue` now.
+**Status:** decisions #1–#10 are locked as of Phase 6. Compression,
+encryption, delta sync, and logging/observability beyond
+`BackgroundSyncLog` are deliberately left open — they belong to later
+phases.

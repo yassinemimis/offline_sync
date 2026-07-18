@@ -42,7 +42,10 @@ dependencies:
 
   offline_sync_dio:
     path: ../../packages/offline_sync_dio
+  offline_sync_workmanager:          
+    path: ../../packages/offline_sync_workmanager  
   cupertino_icons: ^1.0.8
+  shared_preferences: ^2.2.0
 
 dev_dependencies:
   flutter_test:
