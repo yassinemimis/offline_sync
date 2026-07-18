@@ -13,8 +13,9 @@
             <link>https://yassinemimis.github.io/offline_sync/fr/blog/why-offline-first-mandatory</link>
             <guid>https://yassinemimis.github.io/offline_sync/fr/blog/why-offline-first-mandatory</guid>
             <pubDate>Tue, 14 Jul 2026 00:00:00 GMT</pubDate>
-            <description><![CDATA[For many years, mobile applications were designed with one simple assumption:]]></description>
-            <content:encoded><![CDATA[<p>For many years, mobile applications were designed with one simple assumption:</p>
+            <description><![CDATA[Docusaurus logo]]></description>
+            <content:encoded><![CDATA[<p><img decoding="async" loading="lazy" alt="Docusaurus logo" src="https://yassinemimis.github.io/offline_sync/fr/assets/images/blog-1-4ff312ca755562e04411ed3cb5899f4f.png" width="1672" height="941" class="img_ev3q">
+For many years, mobile applications were designed with one simple assumption:</p>
 <blockquote>
 <p><strong>The user has a constant, reliable internet connection.</strong></p>
 </blockquote>
