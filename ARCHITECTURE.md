@@ -261,9 +261,108 @@ as `timeout` instead of leaving the WorkManager job — and the developer
   Don't trust the OS-level result alone; trust `BackgroundSyncLog`,
   which records what `OfflineSync.sync()` actually did.
 
+## 11. `DeltaSyncTransport` as a separate interface, not an added method on `SyncTransport`
+
+**Decision:** Pull (Phase 7) is defined as its own optional interface:
+
+```dart
+abstract class DeltaSyncTransport {
+  Future<DeltaFetchResult> fetchChanges(SyncAdapter adapter, {DateTime? since});
+}
+```
+
+`DioSyncTransport implements SyncTransport, DeltaSyncTransport` — both,
+but as two separate interfaces.
+
+**Why:** Adding a new *required* method directly to `SyncTransport` would
+have been a breaking change — any existing code (including the example
+documented in `Network_Layer.mdx`) that does `implements SyncTransport`
+would fail to compile immediately. A separate interface lets any
+existing transport keep working unchanged (with no pull support), and
+makes enabling pull entirely opt-in — the engine checks
+`transport is DeltaSyncTransport` at call time and throws a clear
+`StateError` if it isn't supported, instead of a silent failure or a
+compile break.
+
+**Consequence:** any future transport (GraphQL, Firebase — Phase 12) is
+free to decide whether it supports delta pull or not, with no forced
+obligation either way.
+
+## 12. A dedicated sync-cursor table, not one computed from `MAX(updatedAt)`
+
+**Decision:** `SyncCursorsTable` (Drift) — one row per `entityName`, a
+single `lastSyncedAt` column.
+
+**Why:** The alternative (dynamically computing the cursor from the
+newest `updatedAt` in `EntitiesTable`) is dangerous: if there's a local
+edit that hasn't synced yet, its local `updatedAt` can end up newer than
+anything actually confirmed with the server — so the cursor "jumps
+forward" incorrectly, and misses genuine server-side changes that are
+older than the local edit but newer than the last real pull. A dedicated
+table cleanly separates "last successful sync" from "last local edit."
+
+**Trade-off:** a single `DateTime` column instead of a more general
+design (a string `cursorToken` that could support pagination tokens from
+GraphQL/Firebase later). A deliberate choice — not designing for a
+problem we haven't reached yet.
+
+## 13. `ConflictHandler` is reused verbatim between push-detected and pull-detected conflicts
+
+**Decision:** A conflict detected via `409` (push) and a conflict
+detected via `DeltaPuller` (pull) both go through the **same**
+`ConflictHandler.resolve()`, with no separate branch of logic.
+`DeltaPuller` constructs a synthetic
+`SyncTransportResult.conflict(serverData, serverVersion)` from a
+`DeltaRecord` specifically for this purpose.
+
+**Why:** a conflict is defined the same way regardless of *how* it was
+discovered (a rejected send attempt, or a pull that surfaces a server
+change colliding with a pending local edit) — writing a second, separate
+resolution path would have duplicated logic (violating DRY) and created
+an extra opportunity for inconsistent behavior between the two paths.
+
+**Known gap (deliberately unresolved):** if push resolves a conflict
+within the same `sync()` call (re-enqueuing from a `clientWins`
+outcome), the pull phase that immediately follows may detect the same
+item as "changed" and trigger a second conflict resolution on the same
+state. Documented as a TODO comment in `OfflineSync.sync()`; not yet
+exercised by a real-world test scenario.
+
+**Known gap #2:** "deleted on the server" vs. "pending local edit"
+conflicts currently always resolve in the server's favor (regardless of
+the chosen strategy), because "recreating a resource the server deleted"
+is a different behavioral decision than resolving an ordinary data
+conflict, and hasn't been settled yet.
+
+## 14. `SyncAdapter<T>.updatedAtFromJson()` — containing generics unsoundness
+
+**Decision:** instead of reading `adapter.getUpdatedAt(adapter.fromJson(json))`
+from code holding a **raw** `SyncAdapter` reference (without `<T>`, as is
+the case in `AdapterRegistry.byEntityName()`), a method was added inside
+`SyncAdapter<T>` itself:
+
+```dart
+DateTime updatedAtFromJson(Map<String, dynamic> json) => getUpdatedAt(fromJson(json));
+```
+
+**Why:** `getUpdatedAt` is typed `DateTime Function(T)` — `T` appears in
+*input* position. Reading it as a standalone value through a raw
+(non-generic) reference is unsound in Dart, and throws a `TypeError` at
+runtime even when the actual call was logically valid. Wrapping it in a
+method whose external signature never mentions `T` at all fixes this:
+`T` stays contained inside the method body and never "leaks" into a
+value type read from the outside. This issue was discovered for real
+while testing Phase 7 (Pull), via an actual runtime error — not
+theoretical analysis.
+
+**Consequence:** any future code that needs `updatedAt` from a raw
+`SyncAdapter` (referenced by `entityName`, not by `Type`) should use
+`updatedAtFromJson`, not the old manual composition.
+
 ---
 
-**Status:** decisions #1–#10 are locked as of Phase 6. Compression,
-encryption, delta sync, and logging/observability beyond
+**Status:** decisions #1–#10 are locked as of Phase 6. Decisions
+#11–#14 were added after completing and manually device-testing Phase 7
+(Delta Sync). Compression, encryption, and logging/observability beyond
 `BackgroundSyncLog` are deliberately left open — they belong to later
 phases.

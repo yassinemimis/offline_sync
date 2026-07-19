@@ -62,8 +62,8 @@ why they were made.
       `EntitiesTable`.
 - [x] **Phase 5 — Connectivity detection.** Auto-trigger `sync()` when the
       device comes back online.
-- [ ] **Phase 6 — Background sync.** Keep syncing while the app is closed.
-- [ ] **Phase 7 — Delta sync.** Send/fetch only changed records.
+- [x] **Phase 6 — Background sync.** Keep syncing while the app is closed.
+- [x] **Phase 7 — Delta sync.** Send/fetch only changed records.
 - [ ] **Phase 8 — Compression.** GZIP large payloads.
 - [ ] **Phase 9 — Encryption.** At-rest encryption for sensitive local data.
 - [ ] **Phase 10 — Logging & observability.**

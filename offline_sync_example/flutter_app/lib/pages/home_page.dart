@@ -166,13 +166,101 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+  Future<void> _pull() async {
+  try {
+    await OfflineSync.pull<Todo>();
+    await _refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Pull completed")),
+    );
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Pull failed: $e")),
+    );
+  }
+}
+Future<void> _editTodo(Todo todo) async {
+  final controller = TextEditingController(text: todo.title);
 
+  final newTitle = await showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Edit Todo'),
+      content: TextField(
+        controller: controller,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Title'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    ),
+  );
+
+  if (newTitle == null || newTitle.isEmpty || newTitle == todo.title) return;
+
+  // Local edit only — deliberately NOT calling OfflineSync.sync() here,
+  // so this queues an `update` operation without immediately trying to
+  // push it. That's the whole point of the conflict-testing scenario:
+  // a local change sits in the queue while Postman edits the same
+  // record on the server first.
+  await OfflineSync.save(Todo(
+    id: todo.id,
+    title: newTitle,
+    completed: todo.completed,
+    updatedAt: DateTime.now(),
+  ));
+
+  await _refresh();
+
+// Self-documenting proof for conflict tests — no need to manually
+// check the pending Chip anymore, it's now baked into the log you're
+// already copying from Debug Console.
+debugPrint('📋 After local edit: pending=$_pendingCount, testMode=${OfflineSync.debugDisableOpportunisticSync}');
+
+if (!mounted) return;
+ScaffoldMessenger.of(context).showSnackBar(
+  const SnackBar(content: Text("Edited locally — not synced yet")),
+);
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Offline Sync Example"),
         actions: [
+          IconButton(
+  icon: Icon(
+    OfflineSync.debugDisableOpportunisticSync
+        ? Icons.science
+        : Icons.science_outlined,
+  ),
+  tooltip: 'Toggle test mode (disables auto-push)',
+  onPressed: () {
+    setState(() {
+      OfflineSync.debugDisableOpportunisticSync =
+          !OfflineSync.debugDisableOpportunisticSync;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          OfflineSync.debugDisableOpportunisticSync
+              ? '🧪 Test mode ON — opportunistic push disabled'
+              : '🧪 Test mode OFF — opportunistic push restored',
+        ),
+      ),
+    );
+  },
+),
           IconButton(
             icon: const Icon(Icons.bug_report),
             tooltip: 'Background Sync Log',
@@ -242,6 +330,10 @@ class _HomePageState extends State<HomePage> {
                       : const Text("Sync now"),
                 ),
                 OutlinedButton(
+  onPressed: _pull,
+  child: const Text("Pull"),
+),
+                OutlinedButton(
                   onPressed: _scheduleBackgroundTest,
                   child: const Text("Schedule BG Test"),
                 ),
@@ -269,6 +361,7 @@ class _HomePageState extends State<HomePage> {
                               'ID: ${todo.id}\nUpdated: ${todo.updatedAt}',
                             ),
                             isThreeLine: true,
+                            onTap: () => _editTodo(todo),
                           );
                         },
                       ),

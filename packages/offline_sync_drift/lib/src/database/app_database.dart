@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../tables/entities_table.dart';
+import '../tables/sync_cursors_table.dart';
 import '../tables/sync_operations_table.dart';
 
 part 'app_database.g.dart';
@@ -16,7 +17,7 @@ part 'app_database.g.dart';
 /// NOTE: `app_database.g.dart` is generated. After pulling this file, run:
 /// `dart run build_runner build --force-jit`
 /// from `packages/offline_sync_drift/`.
-@DriftDatabase(tables: [EntitiesTable, SyncOperationsTable])
+@DriftDatabase(tables: [EntitiesTable, SyncOperationsTable, SyncCursorsTable])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
@@ -24,7 +25,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.withExecutor(QueryExecutor executor) : super(executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -46,6 +47,11 @@ class AppDatabase extends _$AppDatabase {
               syncOperationsTable,
               syncOperationsTable.localVersion,
             );
+          }
+          if (from < 4) {
+            // Phase 7: delta sync needs a per-entityName watermark to
+            // resume pulling from.
+            await m.createTable(syncCursorsTable);
           }
         },
       );

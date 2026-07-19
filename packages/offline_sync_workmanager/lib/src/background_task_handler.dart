@@ -15,12 +15,12 @@ const Duration kBackgroundSyncTimeout = Duration(minutes: 2);
 ///
 /// Every attempt is automatically recorded via [BackgroundSyncLog] —
 /// success, failure (with the error message), or timeout — regardless of
-/// what [performSync] itself does. You don't need to add your own
-/// logging inside [performSync] just to know whether it ran.
+/// what [performSync] itself does.
 Future<bool> handleBackgroundTask(
   String task,
-  Future<void> Function() performSync,
-) async {
+  Future<void> Function() performSync, {
+  Duration timeout = kBackgroundSyncTimeout,
+}) async {
   if (task != kOfflineSyncTaskName) {
     return true; // not ours — some other WorkManager task, ignore
   }
@@ -28,7 +28,7 @@ Future<bool> handleBackgroundTask(
   final startedAt = DateTime.now();
 
   try {
-    await performSync().timeout(kBackgroundSyncTimeout);
+    await performSync().timeout(timeout);
     await BackgroundSyncLog.record(BackgroundSyncAttempt(
       startedAt: startedAt,
       outcome: 'success',
@@ -38,9 +38,9 @@ Future<bool> handleBackgroundTask(
     await BackgroundSyncLog.record(BackgroundSyncAttempt(
       startedAt: startedAt,
       outcome: 'timeout',
-      detail: 'exceeded $kBackgroundSyncTimeout',
+      detail: 'exceeded $timeout',
     ));
-    return false; // ask WorkManager to retry
+    return false;
   } catch (e) {
     await BackgroundSyncLog.record(BackgroundSyncAttempt(
       startedAt: startedAt,

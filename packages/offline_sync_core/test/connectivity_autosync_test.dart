@@ -32,6 +32,7 @@ class _FakeConnectivityChecker implements ConnectivityChecker {
 class _InMemoryStorage implements LocalStorage {
   final _entities = <String, Map<String, dynamic>>{};
   final _queue = <SyncOperation>[];
+  final _cursors = <String, DateTime>{}; // ← جديد، لأجل getSyncCursor/setSyncCursor
 
   @override
   Future<void> init() async {}
@@ -54,7 +55,8 @@ class _InMemoryStorage implements LocalStorage {
   Future<void> hardDeleteEntity({required String entityName, required String entityId}) async {}
 
   @override
-  Future<int> markSynced({required String entityName, required String entityId, int? serverVersion}) async => serverVersion ?? 1;
+  Future<int> markSynced({required String entityName, required String entityId, int? serverVersion}) async =>
+      serverVersion ?? 1;
 
   @override
   Future<void> reconcileEntity({
@@ -86,8 +88,28 @@ class _InMemoryStorage implements LocalStorage {
   @override
   Future<void> removeOperation(String operationId) async => _queue.removeWhere((o) => o.id == operationId);
 
-   @override
+  @override
   Future<int> totalQueuedOperationsCount() async => _queue.length;
+
+  // Unlike getPendingOperations, this returns EVERY queued operation for
+  // one entity regardless of status — including `failed` rows mid-backoff.
+  // DeltaPuller relies on that to detect a genuine conflict; filtering by
+  // `pending` here would let a temporarily-stalled local edit get silently
+  // overwritten by a pulled server record. See LocalStorage.getOperationsForEntity docs.
+  @override
+  Future<List<SyncOperation>> getOperationsForEntity({
+    required String entityName,
+    required String entityId,
+  }) async =>
+      _queue.where((o) => o.entityName == entityName && o.entityId == entityId).toList();
+
+  @override
+  Future<DateTime?> getSyncCursor(String entityName) async => _cursors[entityName];
+
+  @override
+  Future<void> setSyncCursor(String entityName, DateTime cursor) async {
+    _cursors[entityName] = cursor;
+  }
 }
 
 class _CountingTransport implements SyncTransport {

@@ -1,7 +1,9 @@
 import 'package:dio/dio.dart';
 import 'package:offline_sync_core/offline_sync_core.dart';
 
-/// [SyncTransport] backed by [Dio].
+/// [SyncTransport] backed by [Dio]. Also implements [DeltaSyncTransport]
+/// — pass this same instance to `OfflineSync.initialize(transport: ...)`
+/// and both push (`sync()`) and pull (`OfflineSync.pull<T>()`) work.
 ///
 /// Verb mapping, by [SyncOperationType]:
 ///
@@ -20,6 +22,30 @@ import 'package:offline_sync_core/offline_sync_core.dart';
 /// if it differs (that's exactly why [SyncTransport] is an interface and
 /// not hardcoded into `core` — see ARCHITECTURE.md, decision #6).
 ///
+/// ## Delta fetch (`fetchChanges`)
+///
+/// `GET adapter.endpoint?since=<ISO8601>` (the `since` param is omitted
+/// entirely on the first pull for an entity — see
+/// `LocalStorage.getSyncCursor`). Expected response shape:
+///
+/// ```json
+/// {
+///   "records": [
+///     { "id": "u1", "deleted": false, "version": 3, "updatedAt": "2026-07-16T10:00:00Z", "data": { "id": "u1", "name": "Ahmed" } },
+///     { "id": "u2", "deleted": true,  "version": 5, "updatedAt": "2026-07-16T10:05:00Z" }
+///   ],
+///   "fetchedAt": "2026-07-16T10:06:00Z"
+/// }
+/// ```
+///
+/// `id`/`deleted`/`version`/`updatedAt` are read directly rather than via
+/// `adapter.fromJson` — a deleted-record marker may carry no other
+/// fields, and `fromJson` isn't expected to handle that shape. `data` is
+/// only decoded (via `adapter.fromJson`, downstream in `DeltaPuller`)
+/// when `deleted` is `false`. `fetchedAt` becomes the next pull's `since`
+/// cursor — see `DeltaFetchResult` docs for why the transport supplies it
+/// rather than the caller computing `DateTime.now()`.
+///
 /// Pass in your own [Dio] instance so this package never has an opinion
 /// on `baseUrl`, auth headers, interceptors, or timeouts — configure
 /// those on the [Dio] you construct, the same as you would for any other
@@ -36,7 +62,7 @@ import 'package:offline_sync_core/offline_sync_core.dart';
 ///   transport: DioSyncTransport(dio),
 /// );
 /// ```
-class DioSyncTransport implements SyncTransport {
+class DioSyncTransport implements SyncTransport, DeltaSyncTransport {
   DioSyncTransport(this._dio);
   final Dio _dio;
 
@@ -102,5 +128,47 @@ class DioSyncTransport implements SyncTransport {
         message: e.message ?? e.type.name,
       );
     }
+  }
+
+  @override
+  Future<DeltaFetchResult> fetchChanges(
+    SyncAdapter adapter, {
+    DateTime? since,
+  }) async {
+    final response = await _dio.get(
+      adapter.endpoint,
+      queryParameters:
+          since == null ? null : {'since': since.toIso8601String()},
+    );
+
+    final body = response.data;
+    if (body is! Map || body['records'] is! List) {
+      throw StateError(
+        'Delta fetch for "${adapter.entityName}" returned an unexpected '
+        'response shape — expected {"records": [...], "fetchedAt": "..."}. '
+        'Got: ${response.data.runtimeType}',
+      );
+    }
+
+    final records = (body['records'] as List).map((raw) {
+      final map = Map<String, dynamic>.from(raw as Map);
+      final isDeleted = map['deleted'] == true;
+
+      return DeltaRecord(
+        entityId: map['id'] as String,
+        data: isDeleted
+            ? const {}
+            : Map<String, dynamic>.from(map['data'] as Map? ?? const {}),
+        version: (map['version'] as num?)?.toInt() ?? 0,
+        updatedAt: DateTime.parse(map['updatedAt'] as String),
+        deleted: isDeleted,
+      );
+    }).toList();
+
+    final fetchedAtRaw = body['fetchedAt'] as String?;
+    final fetchedAt =
+        fetchedAtRaw != null ? DateTime.parse(fetchedAtRaw) : DateTime.now();
+
+    return DeltaFetchResult(records: records, fetchedAt: fetchedAt);
   }
 }
