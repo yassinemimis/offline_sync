@@ -52,10 +52,10 @@ Future<void> main() async {
     // conflictResolver: const ConflictResolver.serverWins(),
 
     // 2) Client Wins
-    // conflictResolver: const ConflictResolver.clientWins(),
+     conflictResolver: const ConflictResolver.clientWins(),
 
     // 3) Last Write Wins (default — same as omitting this param entirely)
-    conflictResolver: const ConflictResolver.lastWriteWins(),
+    // conflictResolver: const ConflictResolver.serverWins(),
 
     // 4) Manual — uncomment this block INSTEAD of the line above,
     // comment the line above out when testing this one.

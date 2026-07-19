@@ -1,4 +1,124 @@
 ---
+id: delta-sync
+title: Delta Sync
 sidebar_position: 7
+description: Pulling server-side changes into local storage — the read half of Offline Sync.
 ---
+
 # Delta Sync
+
+Everything covered in [Queue Engine](/docs/guides/queue-engine),
+[Network Layer](/docs/guides/network-layer), and
+[Conflict Resolution](/docs/guides/conflict-resolution) is about **pushing**
+local changes to the server. Delta Sync is the other direction: pulling
+changes *the server* knows about — made by another device, another user, a
+backend job — into local storage.
+
+## Why this is a separate, explicit step
+
+`sync()` never guessed what changed on the server on its own — until you
+call `pull()` (or `sync()`, which now also triggers it — see below), your
+local data only reflects what *this device* has written, plus whatever the
+last pull brought in. This is deliberate: a network fetch is something your
+app should choose when to do (screen load, pull-to-refresh), not something
+that happens implicitly behind a `save()` call.
+
+## Enabling it
+
+Delta Sync is opt-in at the transport level. Only transports that implement
+`DeltaSyncTransport` support it — `offline_sync_dio`'s `DioSyncTransport`
+does out of the box:
+
+```dart
+await OfflineSync.initialize(
+  storage: DriftLocalStorage(),
+  transport: DioSyncTransport(dio), // implements SyncTransport AND DeltaSyncTransport
+);
+OfflineSync.register<Todo>(todoAdapter);
+
+// Pull one entity type explicitly:
+await OfflineSync.pull<Todo>();
+```
+
+If your transport doesn't implement `DeltaSyncTransport`, `pull()` throws a
+clear `StateError` rather than failing silently.
+
+## `sync()` pulls too, after pushing
+
+Calling `sync()` pushes the queue first (same as always), then — if the
+configured transport supports it — pulls changes for every registered
+entity type:
+
+```dart
+await OfflineSync.sync(); // push queue, then pull every registered entity
+```
+
+Push always runs first, so a locally queued change gets its own chance to
+reach the server (and resolve a version conflict through the normal `409`
+path — see [Conflict Resolution](/docs/guides/conflict-resolution)) before
+pull independently checks the same entity. A pull failure for one entity
+type doesn't stop the others, or hide that push already completed.
+
+Call `pull<T>()` directly instead of `sync()` if you only want to refresh
+one entity type without also draining the push queue.
+
+## How a pull works
+
+1. Reads the stored cursor for the entity type — the `fetchedAt` from the
+   last successful pull, or nothing on the first pull ever.
+2. Calls `DeltaSyncTransport.fetchChanges(adapter, since: cursor)`.
+3. For each returned record:
+   - **No competing local change** → the server's copy is written directly
+     (`reconcileEntity`), marked synced.
+   - **A local change is queued for the same entity** → this is a genuine
+     conflict. It's handed to the exact same `ConflictResolver` /
+     `ConflictHandler` used for push-discovered (`409`) conflicts — see
+     [Conflict Resolution](/docs/guides/conflict-resolution). Both discovery
+     paths resolve identically.
+   - **The record is marked deleted** → the local row is hard-deleted.
+4. Once every record in the batch is fully reconciled, the cursor advances
+   to the fetch's `fetchedAt`. If reconciliation throws partway through, the
+   cursor doesn't move — the next pull retries the whole batch (safe,
+   because reconciling a record is an idempotent upsert).
+
+:::caution Known gap
+If the server reports a record as deleted *and* there's an unsynced local
+change queued for it, the server currently always wins — the local change
+is discarded and the row is removed. Recreating a server-deleted resource
+to honor a "client wins" strategy needs different semantics than a normal
+data conflict, and isn't decided yet. Don't rely on client-side edits
+surviving a server-side delete.
+:::
+
+## Transport contract: what your backend needs to return
+
+`DioSyncTransport.fetchChanges` calls `GET <endpoint>?since=<ISO8601>` (the
+`since` param is omitted entirely on the first pull) and expects:
+
+```json
+{
+  "records": [
+    { "id": "u1", "deleted": false, "version": 3, "updatedAt": "2026-07-16T10:00:00Z", "data": { "id": "u1", "name": "Ahmed" } },
+    { "id": "u2", "deleted": true,  "version": 5, "updatedAt": "2026-07-16T10:05:00Z" }
+  ],
+  "fetchedAt": "2026-07-16T10:06:00Z"
+}
+```
+
+`id` / `deleted` / `version` / `updatedAt` are top-level, separate from
+`data` — a deletion marker may not carry enough fields for your model's
+`fromJson` to succeed, so these are read directly instead of being decoded
+through the adapter. `fetchedAt` becomes the next pull's cursor; it's
+supplied by the server response rather than computed as `DateTime.now()` by
+the client, so clock skew between client and server can't cause pulls to
+silently skip records.
+
+If your backend can't return this shape, implement `DeltaSyncTransport`
+yourself the same way you would a [custom `SyncTransport`](/docs/guides/network-layer#custom-transports)
+— it's a single method.
+
+## Related
+
+- [Queue Engine](/docs/guides/queue-engine)
+- [Network Layer](/docs/guides/network-layer)
+- [Conflict Resolution](/docs/guides/conflict-resolution)

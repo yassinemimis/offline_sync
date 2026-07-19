@@ -39,7 +39,7 @@ class ConflictHandler {
     SyncTransportResult result,
     LocalStorage storage,
   ) async {
-    final serverEntity = adapter.fromJson(result.serverData!);
+   
     switch (_resolver.type) {
       case ConflictStrategyType.clientWins:
         await storage.enqueueOperation(SyncOperation(
@@ -57,7 +57,7 @@ class ConflictHandler {
           entityId: op.entityId,
           data: result.serverData!,
           version: result.serverVersion!,
-          updatedAt: adapter.getUpdatedAt(serverEntity),
+          updatedAt: adapter.updatedAtFromJson(result.serverData!),
           isSynced: true,
         );
     }
@@ -70,19 +70,16 @@ class ConflictHandler {
     SyncTransportResult result,
     LocalStorage storage,
   ) async {
-    final localEntity = adapter.fromJson(op.payload);
-    final serverEntity = adapter.fromJson(result.serverData!);
-
     final conflict = SyncConflict(
-      entityName: op.entityName,
-      entityId: op.entityId,
-      localData: op.payload,
-      localVersion: op.localVersion,
-      localUpdatedAt: adapter.getUpdatedAt(localEntity),
-      serverData: result.serverData!,
-      serverVersion: result.serverVersion!,
-      serverUpdatedAt: adapter.getUpdatedAt(serverEntity),
-    );
+  entityName: op.entityName,
+  entityId: op.entityId,
+  localData: op.payload,
+  localVersion: op.localVersion,
+  localUpdatedAt: adapter.updatedAtFromJson(op.payload),
+  serverData: result.serverData!,
+  serverVersion: result.serverVersion!,
+  serverUpdatedAt: adapter.updatedAtFromJson(result.serverData!),
+);
 
     final winningData = await _resolver.resolve(conflict);
     final winnerIsServer = identical(winningData, conflict.serverData);

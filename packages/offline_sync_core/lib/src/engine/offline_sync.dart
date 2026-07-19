@@ -49,6 +49,12 @@ class OfflineSync {
   static SyncRunner? _syncRunner;
   static DeltaPuller? _deltaPuller;
   static AutoSyncController? _autoSyncController;
+  /// Test-only escape hatch: when `true`, `save`/`delete` skip their
+/// opportunistic background sync. Exists solely to deterministically
+/// test the *pull* conflict-discovery path in isolation, without racing
+/// against push resolving the same conflict first. Never enable this in
+/// production code — it's a debugging aid, not a feature.
+static bool debugDisableOpportunisticSync = false;
 
   /// [transport] is optional: apps that only need local persistence
   /// (`save`/`getAll`, no server yet) can omit it — [sync], [pull], and
@@ -137,7 +143,9 @@ class OfflineSync {
     // connectivity *change* event that may never fire. Fire-and-forget:
     // failures are handled by SyncRunner's own retry/backoff, same as any
     // other sync attempt.
-    unawaited(_syncRunner?.run());
+    if (!debugDisableOpportunisticSync) {
+  unawaited(_syncRunner?.run());
+}
   }
 
   static Future<void> delete<T>(String id) async {

@@ -222,10 +222,15 @@ Future<void> _editTodo(Todo todo) async {
 
   await _refresh();
 
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(content: Text("Edited locally — not synced yet")),
-  );
+// Self-documenting proof for conflict tests — no need to manually
+// check the pending Chip anymore, it's now baked into the log you're
+// already copying from Debug Console.
+debugPrint('📋 After local edit: pending=$_pendingCount, testMode=${OfflineSync.debugDisableOpportunisticSync}');
+
+if (!mounted) return;
+ScaffoldMessenger.of(context).showSnackBar(
+  const SnackBar(content: Text("Edited locally — not synced yet")),
+);
 }
   @override
   Widget build(BuildContext context) {
@@ -233,6 +238,29 @@ Future<void> _editTodo(Todo todo) async {
       appBar: AppBar(
         title: const Text("Offline Sync Example"),
         actions: [
+          IconButton(
+  icon: Icon(
+    OfflineSync.debugDisableOpportunisticSync
+        ? Icons.science
+        : Icons.science_outlined,
+  ),
+  tooltip: 'Toggle test mode (disables auto-push)',
+  onPressed: () {
+    setState(() {
+      OfflineSync.debugDisableOpportunisticSync =
+          !OfflineSync.debugDisableOpportunisticSync;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          OfflineSync.debugDisableOpportunisticSync
+              ? '🧪 Test mode ON — opportunistic push disabled'
+              : '🧪 Test mode OFF — opportunistic push restored',
+        ),
+      ),
+    );
+  },
+),
           IconButton(
             icon: const Icon(Icons.bug_report),
             tooltip: 'Background Sync Log',

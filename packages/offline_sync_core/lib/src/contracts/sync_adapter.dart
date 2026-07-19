@@ -53,4 +53,21 @@ class SyncAdapter<T> {
   /// for models that already carry a `deleted` field. If omitted, the core
   /// engine tracks deletion purely via queue metadata.
   final bool Function(T entity)? isDeleted;
+
+  /// Decodes [json] and immediately extracts its `updatedAt`, in one
+  /// call. Exists specifically so calling code that only has a
+  /// *raw*-typed `SyncAdapter` reference (e.g. looked up by
+  /// `entityName` via `AdapterRegistry.byEntityName`, which has no
+  /// compile-time `T` to work with) can still get the updatedAt safely.
+  ///
+  /// Reading `getUpdatedAt` as a standalone field value through a raw
+  /// `SyncAdapter` reference is unsound in Dart — `T` appears in
+  /// *input* position (`DateTime Function(T)`), so the runtime downcast
+  /// Dart inserts at the field-read site can fail with a `TypeError`
+  /// even though the underlying call would have worked fine. Wrapping
+  /// it in a method whose own signature never mentions `T` sidesteps
+  /// the problem entirely — `T` stays safely bound inside this method's
+  /// body instead of leaking into the type of a value read from outside.
+  DateTime updatedAtFromJson(Map<String, dynamic> json) =>
+      getUpdatedAt(fromJson(json));
 }
